@@ -1402,73 +1402,7 @@ class CharRNN(nn.Module):
             #opts = {'title': 'x'}
             #vis.text(recons_x, win='x', opts=opts)
 
-    def base_dist_trainer(self, train_loader, cuda=True, vis=None, path=None):
-        # get hhats for all batches
-        nbatches = 2 
-        all_hhats = []
-        for i, (data, _, _) in enumerate(it.islice(train_loader, 0, nbatches, 1)):
-            if cuda:
-                data = data.cuda()
-            data = data.unsqueeze(1)
-            xhat, hhat = self.forward(Variable(data.float()))
-            all_hhats.append(hhat.squeeze())
-            print(i)
-        all_hhats = torch.cat(all_hhats, dim=0)
-        
-        # reconstruct
-        xhat_concat = ut.pt_to_audio_overlap(xhat)
-        lr.output.write_wav('reconstructions.wav', xhat_concat, 8000, norm=True)
-        # see the embeddings
-        
-        vis.heatmap(all_hhats.data.cpu()[:100].t(), win='hhat', opts = {'title':'hhats for reconstructions'})
-        
-
-        #lr.output.write_wav('original_data.wav', data.cpu().numpy().reshape(-1)
-        #                    , 8000, norm=True)
-
-        # train base dist
-        if self.base_dist == 'mixture_full_gauss':
-            data = all_hhats.data.cpu().numpy()
-            self.GMM.fit(data)
-        elif self.base_dist == 'HMM':
-            data = all_hhats.data.cpu().numpy()
-            self.HMM.fit(data)
-        elif self.base_dist == 'RNN':
-            # get the loader here
-            inputs = all_hhats[:-1, :].data.cpu()
-            targets = all_hhats[1:, :].data.cpu()
-
-            def form_rnn_dataset(all_hhats):
-                split_size = 100
-                splits = torch.split(all_hhats, split_size=100, dim=0)
-                splits = [splt.unsqueeze(0) for splt in splits if splt.size(0) == 100]  # filter out different size sequences
-                concat = torch.cat(splits, dim=0)
-                return concat 
-            inputs_splt = form_rnn_dataset(inputs).contiguous()
-            targets_splt = form_rnn_dataset(targets).contiguous()
-
-            train_dataset = data_utils.TensorDataset(data_tensor=inputs_splt,
-                                                     target_tensor=targets_splt)
-            loader = data_utils.DataLoader(train_dataset, batch_size=100, shuffle=False, 
-                                           pin_memory=True, num_workers=1)
-
-            self.RNN = GaussianRNN(L=self.K1, K=30, usecuda=self.usecuda,
-                                   usevar=False)
-            if self.usecuda:
-                self.RNN = self.RNN.cuda()
-
-            path = path + '.rnn'
-            if 1 & os.path.exists(path):
-               self.RNN.load_state_dict(torch.load(path)) 
-            else:
-                muhat = self.RNN.trainer(loader)
-                torch.save(self.RNN.state_dict(), path)
-
-                xhat_frames = self.dec(muhat.unsqueeze(-1))
-                xhat_concat = ut.pt_to_audio_overlap(xhat_frames)
-
-                lr.output.write_wav('rnn_reconstructions.wav', xhat_concat, 8000, norm=True)
-
+    
 
     def generate_data(self, N, arguments):
         if self.base_dist == 'mixture_full_gauss':
@@ -1612,6 +1546,144 @@ class audionet(VAE):
         z = z.reshape(-1, self.K, 1)
         xhat = self.dec(z) 
         return xhat
+
+    def base_dist_trainer(self, train_loader, cuda=True, vis=None, path=None):
+        # get hhats for all batches
+        nbatches = None
+        all_hhats = []
+        for i, (data, _, _) in enumerate(it.islice(train_loader, 0, nbatches, 1)):
+            
+            if cuda:
+                data = data.cuda()
+            data = data.unsqueeze(1)
+            xhat, mu, logvar, hhat = self.forward(Variable(data.float()))
+
+            all_hhats.append(hhat.squeeze())
+            print(i)
+        all_hhats = torch.cat(all_hhats, dim=0)
+        
+        # reconstruct
+        xhat_concat = ut.pt_to_audio_overlap(xhat)
+        lr.output.write_wav('reconstructions.wav', xhat_concat, 8000, norm=True)
+        # see the embeddings
+        
+        vis.heatmap(all_hhats.data.cpu()[:100].t(), win='hhat', opts = {'title':'hhats for reconstructions'})
+        
+
+        #lr.output.write_wav('original_data.wav', data.cpu().numpy().reshape(-1)
+        #                    , 8000, norm=True)
+
+        # train base dist
+        if self.base_dist == 'mixture_full_gauss':
+            data = all_hhats.data.cpu().numpy()
+            self.GMM.fit(data)
+        elif self.base_dist == 'HMM':
+            data = all_hhats.data.cpu().numpy()
+            self.HMM.fit(data)
+        elif self.base_dist == 'RNN':
+            # get the loader here
+            inputs = all_hhats[:-1, :].data.cpu()
+            targets = all_hhats[1:, :].data.cpu()
+
+            def form_rnn_dataset(all_hhats):
+                split_size = 100
+                splits = torch.split(all_hhats, split_size=100, dim=0)
+                splits = [splt.unsqueeze(0) for splt in splits if splt.size(0) == 100]  # filter out different size sequences
+                concat = torch.cat(splits, dim=0)
+                return concat 
+            inputs_splt = form_rnn_dataset(inputs).contiguous()
+            targets_splt = form_rnn_dataset(targets).contiguous()
+
+            train_dataset = data_utils.TensorDataset(data_tensor=inputs_splt,
+                                                     target_tensor=targets_splt)
+            loader = data_utils.DataLoader(train_dataset, batch_size=100, shuffle=False, 
+                                           pin_memory=True, num_workers=1)
+
+            self.RNN = GaussianRNN(L=self.K1, K=30, usecuda=self.usecuda,
+                                   usevar=False)
+            if self.usecuda:
+                self.RNN = self.RNN.cuda()
+
+            path = path + '.rnn'
+            if 1 & os.path.exists(path):
+               self.RNN.load_state_dict(torch.load(path)) 
+            else:
+                muhat = self.RNN.trainer(loader)
+                torch.save(self.RNN.state_dict(), path)
+
+                xhat_frames = self.dec(muhat.unsqueeze(-1))
+                xhat_concat = ut.pt_to_audio_overlap(xhat_frames)
+
+                lr.output.write_wav('rnn_reconstructions.wav', xhat_concat, 8000, norm=True)
+
+    def generate_data(self, N, arguments):
+        if self.base_dist == 'mixture_full_gauss':
+            seed = self.GMM.sample(N)[0]
+            seed = torch.from_numpy(seed).float()
+        elif self.base_dist == 'HMM':
+            seed = self.HMM.sample(N)[0]
+            seed = torch.from_numpy(seed).float()
+        elif self.base_dist == 'RNN':
+            self.training = False
+            bs = 2
+            #zerosmat = torch.zeros(  ,bs, self.RNN.K)
+            #if self.usecuda: #next(self.parameters()).is_cuda:
+            #    zerosmat = zerosmat.cuda()
+            #zerosmat = Variable(zerosmat)
+            #h = (zerosmat, zerosmat)
+            inp = torch.zeros(bs, 1, self.RNN.L)
+            if self.usecuda:
+                inp = inp.cuda()
+            inp = Variable(inp)
+            outs = []
+            for l in range(N):
+                if l == 0:
+                    h = self.RNN.rnn(inp)
+                else: 
+                    h = self.RNN.rnn(inp, h[1])
+
+                U = torch.rand(h[0].squeeze().size())
+                if self.usecuda:
+                    U = U.cuda()
+                U = Variable(U)
+                lam = 0.001
+                sms = self.RNN.sm(h[0].squeeze())
+                
+                samples = torch.multinomial(F.softmax(sms, dim=1), 1) 
+
+                eye = torch.eye(self.RNN.K)
+                if self.usecuda:
+                    eye = eye.cuda()
+                eye = Variable(eye)
+
+                smh = eye[samples.squeeze()]
+                
+                #G = - torch.log(-torch.log(U))
+                #smh = F.softmax( (sms + G  )/lam, dim=1)
+
+                mu = torch.matmul(self.RNN.out_mean, smh.t()).t()
+                if self.RNN.usevar:
+                    std = torch.matmul(self.RNN.out_logvar, smh.t()).t()
+                else:
+                    std = 0.2
+                z = torch.randn(bs, self.RNN.L)
+                if self.usecuda: 
+                    z = z.cuda()
+                inp = (Variable(z)*std + mu).unsqueeze(1)
+                outs.append(inp) 
+            outs = torch.cat(outs, dim=1) 
+            seed = outs.view(-1, outs.size(-1), 1)
+
+        if self.base_dist is not 'RNN':
+            seed = seed.view(N, -1, 1)
+            if self.cuda:
+                seed = seed.cuda()
+            seed = Variable(seed)
+        
+        decoded = self.dec(seed)
+        return decoded, seed
+
+
 
 
     

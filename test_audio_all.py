@@ -66,9 +66,8 @@ if model == 'NF':
             bd = mdl.GMM
             ext = '.gmm'
 
-        path = 'models/charnn_{}_K_{}.t'.format(arguments.data, Ks)
+        path = 'models/audionet_{}_K_{}.t'.format(arguments.data, Ks)
         if 1 and os.path.exists(path):
-            
             mdl.load_state_dict(torch.load(path))
             #mdl.trainer(train_loader, vis, EP, arguments.cuda, config_num) 
             #torch.save(mdl.state_dict(), path)
@@ -97,7 +96,7 @@ if model == 'NF':
 
         #av_lls, im_gen, im_test = compute_nparam_density(test_loader, NF, 0.2, arguments.cuda, num_samples=2)
         #results.append((av_lls, Ks))
-        gen_data, seed = mdl.generate_data(4000, arguments)
+        gen_data, seed = mdl.generate_data(1000, arguments)
         opts = {'title' : 'generated data {}'.format(model)}
         vis.line(gen_data.squeeze()[:3].t().data.cpu(), win='generated_{}'.format(model), opts=opts)
         
@@ -109,8 +108,7 @@ if model == 'NF':
         lr.output.write_wav('sample_{}.wav'.format(arguments.data), gen_data_concat, 8000, norm=True)
 
 # do some plotting here
-imagepath = os.path.expanduser('~')
-imagepath = os.path.join(imagepath, 'Dropbox', 'GANs', 'UAI2018', 'paper', 'figures')
+imagepath = 'samples'
 if not os.path.exists(imagepath):
     os.mkdir(imagepath)
 
