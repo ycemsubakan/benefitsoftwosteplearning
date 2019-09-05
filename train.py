@@ -51,7 +51,7 @@ for config_num, Ks in enumerate(Kss):
     if args.cuda:
         mdl.cuda()
 
-    models_dir = f'models/K_{Ks}/{args.seed}/{args.mode}'
+    models_dir = f'models/K_{Ks[0]}/{args.seed}/{args.mode}'
     os.makedirs(models_dir, exist_ok=False)
 
     path = f'{models_dir}/audionet.t'
@@ -77,8 +77,8 @@ for config_num, Ks in enumerate(Kss):
         pickle.dump(mdl.HMM, open(path + '.hmm', 'wb'))
 
     elif args.mode == 'combined':
-        path_init = f'models/K_{Ks}/{args.seed}/2step/audionet.t'
 
+        path_init = f'models/K_{Ks[0]}/{args.seed}/2step/audionet.t'
         assert os.path.exists(path_init)
         assert os.path.exists(path_init + '.hmm')
 
