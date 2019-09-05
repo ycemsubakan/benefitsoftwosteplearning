@@ -1783,16 +1783,15 @@ class audionet(VAE):
         mus = self.mus.data.cpu().numpy()
         self.HMM.means_ = mus
 
-        covars = F.softplus(self.sigs).data.cpu().numpy()
+        covars = F.softplus(self.sigs)
         
         #all_covs = torch.zeros(covars.size(0), covars.size(1), covars.size(1))
         #for n in range(covars.size(0)):
         #    all_covs[n, :, :] = torch.diag(covars[n, :])  
 
-        #self.HMM.covars_ = all_covs.data.cpu().numpy()
-        self.HMM.covars_ = covars
+        self.HMM.covars_ = covars.data.cpu().numpy()
+        self.HMM.covariance_type = 'diag'
 
-        pdb.set_trace()
     
 class GaussianRNN(nn.Module):
     def __init__(self, L, K=200, usecuda=False, usevar=False):

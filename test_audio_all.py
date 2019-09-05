@@ -25,6 +25,9 @@ assert vis.check_connection()
 # Parse command line arguments
 argparser = argparse.ArgumentParser()
 argparser.add_argument('--num_gpus', type=int, help='number of gpus', default=2)
+argparser.add_argument('--joint_tr', type=str, help='whether or not to do ONLY joint training', default=0)
+argparser.add_argument('--extra_tr', type=int, help='whether or not to do extra joint training', default=0)
+
 arguments = argparser.parse_args()
 
 arguments.cuda = torch.cuda.is_available()
@@ -39,6 +42,7 @@ arguments.data = 'synthetic_sounds'
 train_loader, wf = ut.preprocess_audio_files(arguments, overlap=True)
 
 joint_tr = 0
+extra_tr = 0
 results = []
 EP = 200
 base_inits = 20
@@ -65,7 +69,9 @@ for config_num, Ks in enumerate(Kss):
         bd = mdl.GMM
         ext = '.gmm'
 
-    path = 'models/audionet_jointtr_{}_{}_K_{}.t'.format(joint_tr, arguments.data, Ks)
+    model = 'audionet_jointtr_{}_extratr_{}_{}_K_{}.t'.format(arguments.joint_tr, arguments.extra_tr, 
+                                                              arguments.data, Ks)
+    path = 'models/' + model
     if 1 and os.path.exists(path):
         mdl.load_state_dict(torch.load(path))
         #mdl.trainer(train_loader, vis, EP, arguments.cuda, config_num) 
@@ -81,16 +87,16 @@ for config_num, Ks in enumerate(Kss):
                     mdl.GMM = pickle.load(open(path + ext, 'rb'))
 
         # do extra training
-        mdl.np_to_pt_HMM()
-        mdl.base_dist = 'HMM'
-        mdl.joint_tr = 1
-        if arguments.cuda:
-            mdl = mdl.cuda()
+        if arguments.extra_tr:
+            mdl.np_to_pt_HMM()
+            mdl.base_dist = 'HMM'
+            mdl.joint_tr = 1
+            if arguments.cuda:
+                mdl = mdl.cuda()
 
-        pdb.set_trace()
-        mdl.VAE_trainer(arguments.cuda, train_loader, 1, vis = vis) 
-        
-        mdl.pt_to_np_HMM()
+            mdl.VAE_trainer(arguments.cuda, train_loader, 1, vis = vis) 
+            
+            mdl.pt_to_np_HMM()
 
     else:
         if not os.path.exists('models'):
@@ -146,4 +152,4 @@ spec = np.abs(lr.stft(gen_data_concat[Tstart:Tmax]))**pw
 lr.display.specshow(spec, sr=8000, y_axis='log', x_axis='time')
 plt.title('Generated Data')
 
-plt.savefig(imagepath + '/{}.eps'.format(arguments.data), format='eps')
+plt.savefig(imagepath + '/{}.eps'.format(model + arguments.data), format='eps')
