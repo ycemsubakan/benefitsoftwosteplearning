@@ -38,39 +38,39 @@ arguments.data = 'synthetic_sounds'
 
 train_loader, wf = ut.preprocess_audio_files(arguments, overlap=True)
 
-model = 'NF'
+joint_tr = 1
 results = []
-if model == 'NF':
-    EP = 200
-    base_inits = 20
+EP = 200
+base_inits = 20
 
-    # now fit
-    base_dist = 'HMM'
-    Kdict = 370
-    L = 800
+# now fit
+base_dist = 'HMM'
+Kdict = 370
+L = 800
 
-    Kss = [[80]]
-    for config_num, Ks in enumerate(Kss):
-        mdl = audionet(L, Ks[0], 1, 1, 1, base_inits=base_inits, Kdict=Kdict, 
-                       base_dist=base_dist, 
-                       num_gpus=arguments.num_gpus, 
-                       usecuda=arguments.cuda)
+Kss = [[80]]
+for config_num, Ks in enumerate(Kss):
+    mdl = audionet(L, Ks[0], 1, 1, 1, base_inits=base_inits, Kdict=Kdict, 
+                   base_dist=base_dist, 
+                   num_gpus=arguments.num_gpus, 
+                   usecuda=arguments.cuda, joint_tr=joint_tr)
 
-        if arguments.cuda:
-            mdl.cuda()
-        
-        if base_dist == 'HMM':
-            bd = mdl.HMM
-            ext = '.hmm'
-        elif base_dist == 'GMM':
-            bd = mdl.GMM
-            ext = '.gmm'
+    if arguments.cuda:
+        mdl.cuda()
+    
+    if base_dist == 'HMM':
+        bd = mdl.HMM
+        ext = '.hmm'
+    elif base_dist == 'GMM':
+        bd = mdl.GMM
+        ext = '.gmm'
 
-        path = 'models/audionet_{}_K_{}.t'.format(arguments.data, Ks)
-        if 1 and os.path.exists(path):
-            mdl.load_state_dict(torch.load(path))
-            #mdl.trainer(train_loader, vis, EP, arguments.cuda, config_num) 
-            #torch.save(mdl.state_dict(), path)
+    path = 'models/audionet_jointtr_{}_{}_K_{}.t'.format(joint_tr, arguments.data, Ks)
+    if 0 and os.path.exists(path):
+        mdl.load_state_dict(torch.load(path))
+        #mdl.trainer(train_loader, vis, EP, arguments.cuda, config_num) 
+        #torch.save(mdl.state_dict(), path)
+        if not joint_tr:
             if 0:
                 mdl.base_dist_trainer(train_loader, arguments.cuda, vis, path)  
                 pickle.dump(bd, open(path + ext, 'wb'))
@@ -80,32 +80,35 @@ if model == 'NF':
                 else:
                     mdl.GMM = pickle.load(open(path + ext, 'rb'))
 
-        else:
-            if not os.path.exists('models'):
-                os.mkdir('models')
-            mdl.base_dist = 'fixed_iso_gauss'
-            mdl.VAE_trainer(arguments.cuda, train_loader, EP, vis = vis) 
+    else:
+        if not os.path.exists('models'):
+            os.mkdir('models')
+        mdl.base_dist = 'fixed_iso_gauss'
+        mdl.VAE_trainer(arguments.cuda, train_loader, EP, vis = vis) 
+        torch.save(mdl.state_dict(), path)
 
-            torch.save(mdl.state_dict(), path)
-            mdl.base_dist = 'HMM'        
+        mdl.base_dist = 'HMM'        
+        
+        if not joint_tr:
             mdl.base_dist_trainer(train_loader, arguments.cuda, vis=vis, path=path)  
             if base_dist == 'mixture_full_gauss':
                 pickle.dump(mdl.GMM, open(path + '.gmm', 'wb'))
-            #elif base_dist == 'HMM':
-            #    pickle.dump(mdl.HMM, open(path + '.hmm', 'wb'))
+                
+        #elif base_dist == 'HMM':
+        #    pickle.dump(mdl.HMM, open(path + '.hmm', 'wb'))
 
-        #av_lls, im_gen, im_test = compute_nparam_density(test_loader, NF, 0.2, arguments.cuda, num_samples=2)
-        #results.append((av_lls, Ks))
-        gen_data, seed = mdl.generate_data(1000, arguments)
-        opts = {'title' : 'generated data {}'.format(model)}
-        vis.line(gen_data.squeeze()[:3].t().data.cpu(), win='generated_{}'.format(model), opts=opts)
-        
-        gen_data_concat = ut.pt_to_audio_overlap(gen_data) 
+    #av_lls, im_gen, im_test = compute_nparam_density(test_loader, NF, 0.2, arguments.cuda, num_samples=2)
+    #results.append((av_lls, Ks))
+    gen_data, seed = mdl.generate_data(1000, arguments)
+    opts = {'title' : 'generated data {}'.format(model)}
+    vis.line(gen_data.squeeze()[:3].t().data.cpu(), win='generated_{}'.format(model), opts=opts)
+    
+    gen_data_concat = ut.pt_to_audio_overlap(gen_data) 
 
-        vis.line(gen_data_concat[:2000], win='generated_concat')
-        vis.heatmap(seed.data.cpu()[:200].squeeze().t(), win='hhat-gen', opts={'title': 'Generated hhat'})
-        
-        lr.output.write_wav('sample_{}.wav'.format(arguments.data), gen_data_concat, 8000, norm=True)
+    vis.line(gen_data_concat[:2000], win='generated_concat')
+    vis.heatmap(seed.data.cpu()[:200].squeeze().t(), win='hhat-gen', opts={'title': 'Generated hhat'})
+    
+    lr.output.write_wav('sample_{}.wav'.format(arguments.data), gen_data_concat, 8000, norm=True)
 
 # do some plotting here
 imagepath = 'samples'

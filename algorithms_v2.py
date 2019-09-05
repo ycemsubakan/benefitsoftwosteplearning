@@ -30,6 +30,26 @@ import torchvision
 import gmms.gmm_learn as gmm
 
 
+def logsumexp(h, dim=1):
+     m, _ = torch.max(h, dim=dim, keepdim=True)
+     first_term = (h - m).exp().sum(dim, keepdim=True).log() 
+
+     return first_term + m 
+
+def log_Normal_diag(x, mus, vrs):
+
+    log_normal_all = -0.5 * ( vrs.unsqueeze(0).log() + (torch.pow(x.unsqueeze(1) - mus.unsqueeze(0), 2) / vrs.unsqueeze(0)) ).sum(-1)
+    
+    return log_normal_all
+
+def log_Normal_standard(x, average=False, dim=None):
+    log_normal = -0.5 * torch.pow( x , 2 )
+    if average:
+        return torch.mean( log_normal, dim )
+    else:
+        return torch.sum( log_normal, dim )
+
+
 class VAE(nn.Module):
     def __init__(self, L1, L2, Ks, M, outlin='sigmoid'):
         super(VAE, self).__init__()
@@ -40,6 +60,7 @@ class VAE(nn.Module):
         self.M = M
         self.base_dist = 'fixed_iso_gauss'
         self.outlin = outlin
+        self.joint_tr = False
 
         self.fc1 = nn.Linear(self.L1, self.Ks[1])
         #initializationhelper(self.fc1, 'relu')
@@ -55,6 +76,7 @@ class VAE(nn.Module):
 
         self.fc4 = nn.Linear(self.Ks[1], self.L2)
         #initializationhelper(self.fc4, 'relu')
+
 
             
     def initialize_GMMparams(self, GMM=None, mode='GMMinit'): 
@@ -292,6 +314,49 @@ class VAE(nn.Module):
                     
         return h
 
+    def criterion_jointhmm(self, recon_x, x, mu, logvar, e=0):
+        eps = 1e-20
+        #criterion = lambda lam, tar: torch.mean(-tar*torch.log(lam+eps) + lam)
+        recon_x = recon_x.view(-1, self.L2)
+        x = x.view(-1, self.L2)
+
+        crt = lambda xhat, tar: torch.sum(((xhat - tar).abs()), 1)
+        
+        BCE = crt(recon_x, x)
+        v = 1
+        noise = torch.randn(mu.shape)
+        if self.usecuda: 
+            noise = noise.cuda()
+        hhat = mu + noise*(0.5*logvar).exp()
+
+        KLD = -self.hmm_alpha_recursion(hhat)[0] 
+        if e < 0:
+            KLD = 0
+
+        #KLD = -0.5 * torch.sum(1 + logvar - ((mu.pow(2) + logvar.exp())/v), 1)
+        # Normalise by same number of elements as in reconstruction
+        #KLD = KLD /(x.size(0) * x.size(1))
+        return KLD + BCE
+
+    def hmm_alpha_recursion(self, hhat):
+        al = torch.ones(self.Kdict) / self.Kdict
+        if self.usecuda: 
+            al = al.cuda()
+
+        tranmat = F.softmax(self.A, dim=0)
+        sigs = F.softplus(self.sigs)
+        obs_term = log_Normal_diag(hhat, self.mus, self.sigs) 
+        eps = 1e-20
+        for t in range(hhat.size(0)):
+            
+            tran_term = torch.log(eps + torch.matmul(tranmat, al) ) 
+            
+            logal = tran_term + obs_term[t, :]
+            al = F.softmax(logal)
+            logsumexp_al = logsumexp(logal, dim=0)
+
+        return logsumexp_al, al
+
 
 
     def VAE_trainer(self, cuda, train_loader, 
@@ -334,24 +399,29 @@ class VAE(nn.Module):
                 # generator gradient
                 self.zero_grad()
                 out_g, mu, logvar, h = self.forward(tar)
-                err_G = self.criterion(out_g, tar, mu, logvar)
+                if self.joint_tr:
+                    err_G = self.criterion_jointhmm(out_g, tar, mu, logvar, ep) 
+                else:
+                    err_G = self.criterion(out_g, tar, mu, logvar)
                 err_G = err_G.mean(0)
 
                 err_G.backward()
 
                 # step 
                 optimizerG.step()
-                print('EP [{}/{}], error = {}, batch = [{}/{}], config num {}'.format(ep+1, EP, err_G.item(), i+1, len(train_loader), config_num))
+                print('EP [{}/{}], error = {}, batch = [{}/{}], config num {}'.format(ep+1, EP, err_G.item(), 
+                                                                                i+1, len(train_loader), config_num))
                                                                        
                 
-                if (i % 20) == 0:
+                if (i == 20):
+                    print(self.mus[:2, :2])
                     # visdom plots
                     # generate samples 
 
-                    self.eval()
-                    self.train(mode=False)
-                    gen_data, seed = self.generate_data(30)
-                    self.train(mode=True)
+                    #self.eval()
+                    #self.train(mode=False)
+                    #gen_data, seed = self.generate_data(30)
+                    #self.train(mode=True)
 
                     N = 200
                     opts = {'title' : 'x'}
@@ -359,8 +429,10 @@ class VAE(nn.Module):
 
                     opts = {'title' : 'xhat'}
                     vis.line(out_g.cpu()[0].squeeze(), opts=opts, win='xhat')
-
-
+                    
+                    vis.heatmap(F.softmax(self.A, dim=1), win='A')
+                    vis.heatmap(F.softplus(self.sigs), win='sigs')
+                    vis.heatmap(self.mus, win='mus')
 
 
 
@@ -1490,7 +1562,8 @@ class CharRNN(nn.Module):
 # aligan type thing for big image gen. 
 
 class audionet(VAE):
-    def __init__(self, L, K1, K2, output_size, n_layers, Kdict=30, base_inits = 1, base_dist='GMM', num_gpus=1, usecuda=True):
+    def __init__(self, L, K1, K2, output_size, n_layers, Kdict=30, base_inits = 1, base_dist='GMM', num_gpus=1, usecuda=True,
+                 joint_tr=False):
         super(audionet, self).__init__(L, L, [K1, K1], L) 
                                        
         self.rnn = None
@@ -1510,6 +1583,7 @@ class audionet(VAE):
         kernel_size = math.floor(L/4)
         self.kernel_size = kernel_size
         self.K = K1
+        self.Kdict = Kdict 
 
         self.enc = nn.Sequential(
             nn.Conv1d(1, d, kernel_size, 2, int((kernel_size-1)/2)),
@@ -1536,6 +1610,14 @@ class audionet(VAE):
             self.HMM = hmm.GaussianHMM(n_components=Kdict, n_iter=1000,
                                        covariance_type='diag', tol=1e-7, verbose='True')
 
+        self.joint_tr = joint_tr
+        if joint_tr: 
+            # K1 is the observed dimension for the HMM
+            self.A = nn.Parameter(torch.eye(Kdict, Kdict))
+            #self.pi = nn.Parameter(torch.ones(Kdict) / Kdict)
+
+            self.mus = nn.Parameter(torch.randn(Kdict, K1)*0.01)
+            self.sigs = nn.Parameter(torch.rand(Kdict, K1)*0.01) 
 
     def encode(self, x):
         #nn.parallel.data_parallel(self.enc, inp, range(self.num_gpus))
@@ -1579,7 +1661,11 @@ class audionet(VAE):
             self.GMM.fit(data)
         elif self.base_dist == 'HMM':
             data = all_hhats.data.cpu().numpy()
-            self.HMM.fit(data)
+            lenseq = 400
+            N = data.shape[0] - data.shape[0] % lenseq
+
+            lengths = [lenseq] * (N//lenseq)
+            self.HMM.fit(data, lengths)
         elif self.base_dist == 'RNN':
             # get the loader here
             inputs = all_hhats[:-1, :].data.cpu()
@@ -1802,3 +1888,4 @@ def elbo_gmm(self, recon_x, x, mu, logvar):
     
     return NELBO
 
+# dropbox test
