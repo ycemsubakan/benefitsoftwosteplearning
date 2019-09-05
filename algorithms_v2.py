@@ -1769,9 +1769,30 @@ class audionet(VAE):
         decoded = self.dec(seed)
         return decoded, seed
 
+    def np_to_pt_HMM(self):
+        self.A = nn.Parameter(torch.from_numpy(self.HMM.transmat_).t()).float().cuda()
+        #self.pi = nn.Parameter(torch.ones(Kdict) / Kdict)
 
+        self.mus = nn.Parameter(torch.from_numpy(self.HMM.means_)).float().cuda()
+        self.sigs = nn.Parameter(torch.from_numpy(self.HMM.covars_).sum(-1)).float().cuda()
 
+    def pt_to_np_HMM(self):
+        transmat = F.softmax(self.A.t(), dim=1).data.cpu().numpy()
+        self.HMM.transmat_ = transmat
 
+        mus = self.mus.data.cpu().numpy()
+        self.HMM.means_ = mus
+
+        covars = F.softplus(self.sigs).data.cpu().numpy()
+        
+        #all_covs = torch.zeros(covars.size(0), covars.size(1), covars.size(1))
+        #for n in range(covars.size(0)):
+        #    all_covs[n, :, :] = torch.diag(covars[n, :])  
+
+        #self.HMM.covars_ = all_covs.data.cpu().numpy()
+        self.HMM.covars_ = covars
+
+        pdb.set_trace()
     
 class GaussianRNN(nn.Module):
     def __init__(self, L, K=200, usecuda=False, usevar=False):

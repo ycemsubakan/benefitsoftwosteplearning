@@ -38,7 +38,7 @@ arguments.data = 'synthetic_sounds'
 
 train_loader, wf = ut.preprocess_audio_files(arguments, overlap=True)
 
-joint_tr = 1
+joint_tr = 0
 results = []
 EP = 200
 base_inits = 20
@@ -66,7 +66,7 @@ for config_num, Ks in enumerate(Kss):
         ext = '.gmm'
 
     path = 'models/audionet_jointtr_{}_{}_K_{}.t'.format(joint_tr, arguments.data, Ks)
-    if 0 and os.path.exists(path):
+    if 1 and os.path.exists(path):
         mdl.load_state_dict(torch.load(path))
         #mdl.trainer(train_loader, vis, EP, arguments.cuda, config_num) 
         #torch.save(mdl.state_dict(), path)
@@ -79,6 +79,18 @@ for config_num, Ks in enumerate(Kss):
                     mdl.HMM = pickle.load(open(path + ext, 'rb'))
                 else:
                     mdl.GMM = pickle.load(open(path + ext, 'rb'))
+
+        # do extra training
+        mdl.np_to_pt_HMM()
+        mdl.base_dist = 'HMM'
+        mdl.joint_tr = 1
+        if arguments.cuda:
+            mdl = mdl.cuda()
+
+        pdb.set_trace()
+        mdl.VAE_trainer(arguments.cuda, train_loader, 1, vis = vis) 
+        
+        mdl.pt_to_np_HMM()
 
     else:
         if not os.path.exists('models'):
@@ -93,6 +105,12 @@ for config_num, Ks in enumerate(Kss):
             mdl.base_dist_trainer(train_loader, arguments.cuda, vis=vis, path=path)  
             if base_dist == 'mixture_full_gauss':
                 pickle.dump(mdl.GMM, open(path + '.gmm', 'wb'))
+
+        ## initialize for joint training
+        mdl.joint_tr = 1
+
+
+
                 
         #elif base_dist == 'HMM':
         #    pickle.dump(mdl.HMM, open(path + '.hmm', 'wb'))
