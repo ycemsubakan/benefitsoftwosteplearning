@@ -964,7 +964,7 @@ class conv_autoenc(nn.Module):
                                                                                                           len(train_loader), cost.data[0], 
                                                                                                           opt.param_groups[0]['lr'], config_num))
 
-                if ( (ep*5 + i) % 100 ) == 0:
+                if vis is not None and ( (ep*5 + i) % 100 ) == 0:
                     if isinstance(self, conv_autoenc_mice):
                         im1 = ut.collate_images_rectangular(dt, 16, 4, L1=456, L2=320)
                         vis.heatmap(im1, win='x')
@@ -1649,7 +1649,8 @@ class audionet(VAE):
         lr.output.write_wav('reconstructions.wav', xhat_concat, 8000, norm=True)
         # see the embeddings
         
-        vis.heatmap(all_hhats.data.cpu()[:100].t(), win='hhat', opts = {'title':'hhats for reconstructions'})
+        if vis is not None:
+            vis.heatmap(all_hhats.data.cpu()[:100].t(), win='hhat', opts = {'title':'hhats for reconstructions'})
         
 
         #lr.output.write_wav('original_data.wav', data.cpu().numpy().reshape(-1)
@@ -1783,17 +1784,16 @@ class audionet(VAE):
         mus = self.mus.data.cpu().numpy()
         self.HMM.means_ = mus
 
-        covars = F.softplus(self.sigs).data.cpu().numpy()
+        covars = F.softplus(self.sigs)
         
         #all_covs = torch.zeros(covars.size(0), covars.size(1), covars.size(1))
         #for n in range(covars.size(0)):
         #    all_covs[n, :, :] = torch.diag(covars[n, :])  
 
-        #self.HMM.covars_ = all_covs.data.cpu().numpy()
-        self.HMM.covars_ = covars
+        self.HMM.covars_ = covars.data.cpu().numpy()
+        self.HMM.covariance_type = 'diag'
 
-        pdb.set_trace()
-    
+
 class GaussianRNN(nn.Module):
     def __init__(self, L, K=200, usecuda=False, usevar=False):
         super(GaussianRNN, self).__init__()
