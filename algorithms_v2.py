@@ -413,7 +413,7 @@ class VAE(nn.Module):
                                                                                 i+1, len(train_loader), config_num))
                                                                        
                 
-                if (i == 20):
+                if 0 and (i == 20):
                     print(self.mus[:2, :2])
                     # visdom plots
                     # generate samples 
