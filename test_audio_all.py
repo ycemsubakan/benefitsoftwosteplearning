@@ -1,22 +1,12 @@
 import numpy as np
 import torch
 from algorithms_v2 import VAE, audionet
-import pdb
-from torch.autograd import Variable
 import matplotlib.pyplot as plt
 import utils as ut
 import os
 import visdom 
-import torch.optim.lr_scheduler as tol
-import torch.nn.functional as F
-import itertools as it
-import torch.nn as nn
-import sklearn.mixture as mix
 import pickle
-from torchvision import datasets, transforms
 import argparse
-import string
-#import wavenet_things.audio_data as ad
 import librosa as lr
 
 vis = visdom.Visdom(port=5800, server='http://cem@nmf.cs.illinois.edu', env='cem_dev2')
@@ -40,69 +30,51 @@ train_loader, wf = ut.preprocess_audio_files(arguments, overlap=True)
 
 joint_tr = 1
 results = []
-EP = 200
+EP = 200  # number of learning epochs
 base_inits = 20
 
 # now fit
-base_dist = 'HMM'
-Kdict = 370
-L = 800
+Kdict = 370  # number of hidden states in the hmm p(r_t|r_{t-1})
+Kss = [[80]]  # number of latent dimensions in the autoencoder p(h|r)
+L = 800  # observation dimensionality p(x|h)
 
-Kss = [[80]]
+os.makedirs('models', exist_ok=True)
+
 for config_num, Ks in enumerate(Kss):
-    mdl = audionet(L, Ks[0], 1, 1, 1, base_inits=base_inits, Kdict=Kdict, 
-                   base_dist=base_dist, 
-                   num_gpus=arguments.num_gpus, 
-                   usecuda=arguments.cuda, joint_tr=joint_tr)
+    mdl = audionet(L, Ks[0], 1, 1, 1,
+           base_inits=base_inits,
+           Kdict=Kdict, 
+           base_dist='HMM', 
+           num_gpus=arguments.num_gpus, 
+           usecuda=arguments.cuda,
+           joint_tr=joint_tr)
+
+    path = f'models/audionet_jointtr_{joint_tr}_{arguments.data}_K_{Ks}.t'
 
     if arguments.cuda:
         mdl.cuda()
-    
-    if base_dist == 'HMM':
-        bd = mdl.HMM
-        ext = '.hmm'
-    elif base_dist == 'GMM':
-        bd = mdl.GMM
-        ext = '.gmm'
 
-    path = 'models/audionet_jointtr_{}_{}_K_{}.t'.format(joint_tr, arguments.data, Ks)
-    if 0 and os.path.exists(path):
-        mdl.load_state_dict(torch.load(path))
-        #mdl.trainer(train_loader, vis, EP, arguments.cuda, config_num) 
-        #torch.save(mdl.state_dict(), path)
-        if not joint_tr:
-            if 0:
-                mdl.base_dist_trainer(train_loader, arguments.cuda, vis, path)  
-                pickle.dump(bd, open(path + ext, 'wb'))
-            else:
-                if base_dist == 'HMM':
-                    mdl.HMM = pickle.load(open(path + ext, 'rb'))
-                else:
-                    mdl.GMM = pickle.load(open(path + ext, 'rb'))
+    # Joint training ?
+    tmp = mdl.base_dist
+    mdl.base_dist = 'fixed_iso_gauss'
+    mdl.VAE_trainer(arguments.cuda, train_loader, EP, vis = vis) 
+    torch.save(mdl.state_dict(), path)
 
-    else:
-        if not os.path.exists('models'):
-            os.mkdir('models')
-        mdl.base_dist = 'fixed_iso_gauss'
-        mdl.VAE_trainer(arguments.cuda, train_loader, EP, vis = vis) 
-        torch.save(mdl.state_dict(), path)
+    mdl.base_dist = tmp        
 
-        mdl.base_dist = 'HMM'        
-        
-        if not joint_tr:
-            mdl.base_dist_trainer(train_loader, arguments.cuda, vis=vis, path=path)  
-            if base_dist == 'mixture_full_gauss':
-                pickle.dump(mdl.GMM, open(path + '.gmm', 'wb'))
-                
-        #elif base_dist == 'HMM':
-        #    pickle.dump(mdl.HMM, open(path + '.hmm', 'wb'))
+    if not joint_tr:
+        mdl.base_dist_trainer(train_loader, arguments.cuda, vis=vis, path=path)  
+        if mdl.base_dist == 'GMM':
+            pickle.dump(mdl.GMM, open(path + '.gmm', 'wb'))
+        elif mdl.base_dist == 'HMM':
+            pickle.dump(mdl.HMM, open(path + '.hmm', 'wb'))
 
     #av_lls, im_gen, im_test = compute_nparam_density(test_loader, NF, 0.2, arguments.cuda, num_samples=2)
     #results.append((av_lls, Ks))
     gen_data, seed = mdl.generate_data(1000, arguments)
     opts = {'title' : 'generated data {}'.format(model)}
     vis.line(gen_data.squeeze()[:3].t().data.cpu(), win='generated_{}'.format(model), opts=opts)
-    
+
     gen_data_concat = ut.pt_to_audio_overlap(gen_data) 
 
     vis.line(gen_data_concat[:2000], win='generated_concat')
