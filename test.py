@@ -60,6 +60,9 @@ assert os.path.exists(hmm_weights)
 mdl.load_state_dict(torch.load(vae_weights))
 mdl.HMM = pickle.load(open(hmm_weights, 'rb'))
 
+# mdl.np_to_pt_HMM()
+# mdl.pt_to_np_HMM()
+
 gen_data, seed = mdl.generate_data(1000, args)
 gen_data_concat = ut.pt_to_audio_overlap(gen_data) 
 librosa.output.write_wav(f'{model_dir}/sample.wav', gen_data_concat, 8000, norm=True)

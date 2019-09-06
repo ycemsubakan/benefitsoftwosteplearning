@@ -1608,11 +1608,9 @@ class audionet(VAE):
                                        covariance_type='diag', tol=1e-7, verbose='True')
 
         # K1 is the observed dimension for the HMM
-        self.A = nn.Parameter(torch.eye(Kdict, Kdict))
-        #self.pi = nn.Parameter(torch.ones(Kdict) / Kdict)
-
-        self.mus = nn.Parameter(torch.randn(Kdict, K1)*0.01)
-        self.sigs = nn.Parameter(torch.rand(Kdict, K1)*0.01) 
+        self.A = nn.Parameter(torch.ones(Kdict, Kdict))
+        self.mus = nn.Parameter(torch.randn(Kdict, K1))
+        self.sigs = nn.Parameter(torch.randn(Kdict, K1)*0.01 + 1)
 
     def encode(self, x):
         #nn.parallel.data_parallel(self.enc, inp, range(self.num_gpus))
@@ -1638,7 +1636,7 @@ class audionet(VAE):
             all_hhats.append(hhat.squeeze())
             print(i)
         all_hhats = torch.cat(all_hhats, dim=0)
-        
+
         # reconstruct
         xhat_concat = ut.pt_to_audio_overlap(xhat)
         lr.output.write_wav('reconstructions.wav', xhat_concat, 8000, norm=True)
@@ -1766,27 +1764,15 @@ class audionet(VAE):
         return decoded, seed
 
     def np_to_pt_HMM(self):
-        self.A.data.copy_(torch.from_numpy(self.HMM.transmat_).t().float())
-        #self.pi = nn.Parameter(torch.ones(Kdict) / Kdict)
-
+        self.A.data.copy_((torch.from_numpy(self.HMM.transmat_).t() + 1e-6).log().float())  # reversed softmax
         self.mus.data.copy_(torch.from_numpy(self.HMM.means_).float())
+        # self.sigs.data.copy_((torch.from_numpy(self.HMM.covars_).sum(-1).exp() - 1).log().float())  # reversed softplus
         self.sigs.data.copy_(torch.from_numpy(self.HMM.covars_).sum(-1).float())
 
     def pt_to_np_HMM(self):
-        transmat = F.softmax(self.A.t(), dim=1).data.cpu().numpy()
-        self.HMM.transmat_ = transmat
-
-        mus = self.mus.data.cpu().numpy()
-        self.HMM.means_ = mus
-
-        covars = F.softplus(self.sigs)
-
-        #all_covs = torch.zeros(covars.size(0), covars.size(1), covars.size(1))
-        #for n in range(covars.size(0)):
-        #    all_covs[n, :, :] = torch.diag(covars[n, :])  
-
-        self.HMM.covars_ = covars.data.cpu().numpy()
-        self.HMM.covariance_type = 'diag'
+        self.HMM.transmat_ = F.softmax(self.A.t(), dim=1).data.cpu().numpy()
+        self.HMM.means_ = self.mus.data.cpu().numpy()
+        self.HMM.covars_ = F.softplus(self.sigs).data.cpu().numpy()
 
 
 class GaussianRNN(nn.Module):

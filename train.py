@@ -71,7 +71,7 @@ elif args.mode == 'joint':
     mdl.base_dist_trainer(train_loader, args.cuda, vis=vis)  
     mdl.HMM.n_iter = tmp
 
-    mdl.np_to_pt_HMM()
+    # mdl.np_to_pt_HMM()  # one could initialize from hmmlearn
     mdl.VAE_trainer(args.cuda, train_loader, EP=EP, joint_training=True, vis=vis, lr=learning_rate) 
     mdl.pt_to_np_HMM()
 
@@ -86,8 +86,26 @@ elif args.mode == 'combined':
 
     # do extra training
     mdl.np_to_pt_HMM()
+    # import torch
+    # import torch.nn.functional as F
+    # print(F.softmax(mdl.A.data.t(), dim=1)[:10, :10])
+    # print(mdl.HMM.transmat_[:10, :10])
+    # print()
+    # print(mdl.mus.data[:10, :10])
+    # print(mdl.HMM.means_[:10, :10])
+    # print()
+    # print(F.softplus(mdl.sigs.data)[0, :10])
+    # print(mdl.HMM.covars_[0, :10, :10])
     mdl.VAE_trainer(args.cuda, train_loader, EP=EP, joint_training=True, vis=vis, lr=learning_rate) 
     mdl.pt_to_np_HMM()
+    # print(F.softmax(mdl.A.data.t(), dim=1)[:10, :10])
+    # print(mdl.HMM.transmat_[:10, :10])
+    # print()
+    # print(mdl.mus.data[:10, :10])
+    # print(mdl.HMM.means_[:10, :10])
+    # print()
+    # print(F.softplus(mdl.sigs.data)[0, :10])
+    # print(mdl.HMM.covars_[0, :10, :10])
 
 torch.save(mdl.state_dict(), path)
 pickle.dump(mdl.HMM, open(path + '.hmm', 'wb'))
