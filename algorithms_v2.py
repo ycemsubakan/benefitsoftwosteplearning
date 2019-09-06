@@ -344,7 +344,7 @@ class VAE(nn.Module):
 
         tranmat = F.softmax(self.A, dim=0)
         sigs = F.softplus(self.sigs)
-        obs_term = log_Normal_diag(hhat, self.mus, self.sigs) 
+        obs_term = log_Normal_diag(hhat, self.mus, sigs) 
         eps = 1e-20
         for t in range(hhat.size(0)):
             
@@ -1764,10 +1764,10 @@ class audionet(VAE):
         return decoded, seed
 
     def np_to_pt_HMM(self):
-        self.A.data.copy_((torch.from_numpy(self.HMM.transmat_).t() + 1e-6).log().float())  # reversed softmax
+        eps = 0  # 1e-6
+        self.A.data.copy_((torch.from_numpy(self.HMM.transmat_).t() + eps).log().float())  # reversed softmax
         self.mus.data.copy_(torch.from_numpy(self.HMM.means_).float())
-        # self.sigs.data.copy_((torch.from_numpy(self.HMM.covars_).sum(-1).exp() - 1).log().float())  # reversed softplus
-        self.sigs.data.copy_(torch.from_numpy(self.HMM.covars_).sum(-1).float())
+        self.sigs.data.copy_((torch.from_numpy(self.HMM.covars_).sum(-1).exp() - 1).log().float())  # reversed softplus
 
     def pt_to_np_HMM(self):
         self.HMM.transmat_ = F.softmax(self.A.t(), dim=1).data.cpu().numpy()
