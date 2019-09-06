@@ -60,7 +60,6 @@ class VAE(nn.Module):
         self.M = M
         self.base_dist = 'fixed_iso_gauss'
         self.outlin = outlin
-        self.joint_tr = False
 
         self.fc1 = nn.Linear(self.L1, self.Ks[1])
         #initializationhelper(self.fc1, 'relu')
@@ -359,9 +358,9 @@ class VAE(nn.Module):
 
 
 
-    def VAE_trainer(self, cuda, train_loader, 
+    def VAE_trainer(self, cuda, train_loader, joint_training, 
                     EP = 400,
-                    vis = None, config_num=0, **kwargs):
+                    vis = None, config_num=0, lr=1e-5, **kwargs):
 
         if hasattr(kwargs, 'optimizer'):
             optimizer = kwargs['optimizer']
@@ -374,7 +373,6 @@ class VAE(nn.Module):
         L2 = self.L2
         Ks = self.Ks
 
-        lr = 1e-5
         if optimizer == 'Adam':
             optimizerG = optim.Adam(self.parameters(), lr=lr, betas=(0.5, 0.999))
         elif optimizer == 'RMSprop':
@@ -399,7 +397,7 @@ class VAE(nn.Module):
                 # generator gradient
                 self.zero_grad()
                 out_g, mu, logvar, h = self.forward(tar)
-                if self.joint_tr:
+                if joint_training:
                     err_G = self.criterion_jointhmm(out_g, tar, mu, logvar, ep) 
                 else:
                     err_G = self.criterion(out_g, tar, mu, logvar)
@@ -1562,8 +1560,7 @@ class CharRNN(nn.Module):
 # aligan type thing for big image gen. 
 
 class audionet(VAE):
-    def __init__(self, L, K1, K2, output_size, n_layers, Kdict=30, base_inits = 1, base_dist='GMM', num_gpus=1, usecuda=True,
-                 joint_tr=False):
+    def __init__(self, L, K1, K2, output_size, n_layers, Kdict=30, base_inits = 1, base_dist='GMM', num_gpus=1, usecuda=True):
         super(audionet, self).__init__(L, L, [K1, K1], L) 
                                        
         self.rnn = None
@@ -1610,14 +1607,12 @@ class audionet(VAE):
             self.HMM = hmm.GaussianHMM(n_components=Kdict, n_iter=1000,
                                        covariance_type='diag', tol=1e-7, verbose='True')
 
-        self.joint_tr = joint_tr
-        if joint_tr: 
-            # K1 is the observed dimension for the HMM
-            self.A = nn.Parameter(torch.eye(Kdict, Kdict))
-            #self.pi = nn.Parameter(torch.ones(Kdict) / Kdict)
+        # K1 is the observed dimension for the HMM
+        self.A = nn.Parameter(torch.eye(Kdict, Kdict))
+        #self.pi = nn.Parameter(torch.ones(Kdict) / Kdict)
 
-            self.mus = nn.Parameter(torch.randn(Kdict, K1)*0.01)
-            self.sigs = nn.Parameter(torch.rand(Kdict, K1)*0.01) 
+        self.mus = nn.Parameter(torch.randn(Kdict, K1)*0.01)
+        self.sigs = nn.Parameter(torch.rand(Kdict, K1)*0.01) 
 
     def encode(self, x):
         #nn.parallel.data_parallel(self.enc, inp, range(self.num_gpus))
@@ -1771,11 +1766,11 @@ class audionet(VAE):
         return decoded, seed
 
     def np_to_pt_HMM(self):
-        self.A = nn.Parameter(torch.from_numpy(self.HMM.transmat_).t()).float().cuda()
+        self.A.data.copy_(torch.from_numpy(self.HMM.transmat_).t().float())
         #self.pi = nn.Parameter(torch.ones(Kdict) / Kdict)
 
-        self.mus = nn.Parameter(torch.from_numpy(self.HMM.means_)).float().cuda()
-        self.sigs = nn.Parameter(torch.from_numpy(self.HMM.covars_).sum(-1)).float().cuda()
+        self.mus.data.copy_(torch.from_numpy(self.HMM.means_).float())
+        self.sigs.data.copy_(torch.from_numpy(self.HMM.covars_).sum(-1).float())
 
     def pt_to_np_HMM(self):
         transmat = F.softmax(self.A.t(), dim=1).data.cpu().numpy()
@@ -1785,7 +1780,7 @@ class audionet(VAE):
         self.HMM.means_ = mus
 
         covars = F.softplus(self.sigs)
-        
+
         #all_covs = torch.zeros(covars.size(0), covars.size(1), covars.size(1))
         #for n in range(covars.size(0)):
         #    all_covs[n, :, :] = torch.diag(covars[n, :])  
