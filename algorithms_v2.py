@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import torch.utils.data as data_utils
 import torch.nn.utils.rnn as rnn_utils
+import torch.distributions as dist
 from itertools import islice
 import os
 import torch.nn.init as torchinit
@@ -124,26 +125,6 @@ class VAE(nn.Module):
 
         #print('mean of mu {} variance of mu {}'.format(torch.mean(h).data[0], torch.var(h).data[0]))
         return self.decode(h.unsqueeze(-1)), mu, logvar, h
-
-    def criterion(self, recon_x, x, mu, logvar):
-        eps = 1e-20
-        #criterion = lambda lam, tar: torch.mean(-tar*torch.log(lam+eps) + lam)
-        recon_x = recon_x.view(-1, self.L2)
-        x = x.view(-1, self.L2)
-
-        crt = lambda xhat, tar: torch.sum(((xhat - tar).abs()), 1)
-        #mask = torch.ge(recon_x, 1).float()
-        #mask2 = torch.le(recon_x, 0).float()
-        #recon_x = mask*(1-eps) + (1-mask)*recon_x
-        #recon_x = mask2*eps + (1-mask)*recon_x
-        #crt = lambda xhat, tar: -torch.sum(tar*torch.log(xhat+eps) + (1-tar)*torch.log(1-xhat+eps), 1)
-
-        BCE = crt(recon_x, x)
-        v = 1
-        KLD = -0.5 * torch.sum(1 + logvar - ((mu.pow(2) + logvar.exp())/v), 1)
-        # Normalise by same number of elements as in reconstruction
-        #KLD = KLD /(x.size(0) * x.size(1))
-        return BCE + KLD
 
     def criterion_mog(self, recon_x, x, mu, logvar, data='mnist'):
         eps = 1e-20
@@ -313,49 +294,63 @@ class VAE(nn.Module):
                     
         return h
 
-    def criterion_jointhmm(self, recon_x, x, mu, logvar, e=0):
-        eps = 1e-20
-        #criterion = lambda lam, tar: torch.mean(-tar*torch.log(lam+eps) + lam)
-        recon_x = recon_x.view(-1, self.L2)
-        x = x.view(-1, self.L2)
+    def criterion(self, x):
+        x = x.squeeze(1)
 
-        crt = lambda xhat, tar: torch.sum(((xhat - tar).abs()), 1)
-        
-        BCE = crt(recon_x, x)
-        v = 1
-        noise = torch.randn(mu.shape)
-        if self.usecuda: 
-            noise = noise.cuda()
-        hhat = mu + noise*(0.5*logvar).exp()
+        # p(h|x)
+        mu, logvar = self.encode(x.unsqueeze(1))
+        p_h_x = dist.independent.Independent(dist.normal.Normal(mu, logvar.exp()), 1)
 
-        KLD = -self.hmm_alpha_recursion(hhat)[0] 
-        if e < 0:
-            KLD = 0
+        # h ~ p(h|x)
+        h = p_h_x.rsample()
 
-        #KLD = -0.5 * torch.sum(1 + logvar - ((mu.pow(2) + logvar.exp())/v), 1)
-        # Normalise by same number of elements as in reconstruction
-        #KLD = KLD /(x.size(0) * x.size(1))
-        return KLD + BCE
+        # p(x|x)
+        xhat = self.decode(h.unsqueeze(-1)).squeeze(1)
+        p_x_h = dist.independent.Independent(dist.laplace.Laplace(xhat, 1), 1)
 
-    def hmm_alpha_recursion(self, hhat):
-        al = torch.ones(self.Kdict) / self.Kdict
-        if self.usecuda: 
-            al = al.cuda()
+        # p(h)
+        p_h = dist.independent.Independent(dist.normal.Normal(torch.zeros_like(mu), torch.ones_like(logvar)), 1)
 
+        # loss = - p_x_h.log_prob(x) + p_h_x.log_prob(h) - p_h.log_prob(h)
+        loss = - p_x_h.log_prob(x) + dist.kl.kl_divergence(p_h_x, p_h)
+
+        return loss
+
+    def criterion_jointhmm(self, x):
+        x = x.squeeze(1)
+
+        # p(h|x)
+        mu, logvar = self.encode(x.unsqueeze(1))
+        p_h_x = dist.independent.Independent(dist.normal.Normal(mu, logvar.exp()), 1)
+
+        # h ~ p(h|x)
+        h = p_h_x.rsample()
+
+        # p(x|x)
+        xhat = self.decode(h.unsqueeze(-1)).squeeze(1)
+        p_x_h = dist.independent.Independent(dist.laplace.Laplace(xhat, 1), 1)
+
+        # p(h)
+        p_h = dist.independent.Independent(dist.normal.Normal(torch.zeros_like(mu), torch.ones_like(logvar)), 1)
+
+        loss = - p_x_h.log_prob(x) + p_h_x.log_prob(h) - self.hmm_alpha_recursion(h)
+
+        return loss
+
+    def hmm_alpha_recursion(self, h):
         tranmat = F.softmax(self.A, dim=0)
         sigs = F.softplus(self.sigs)
-        obs_term = log_Normal_diag(hhat, self.mus, sigs) 
-        eps = 1e-20
-        for t in range(hhat.size(0)):
-            
-            tran_term = torch.log(eps + torch.matmul(tranmat, al) ) 
-            
-            logal = tran_term + obs_term[t, :]
-            al = F.softmax(logal)
-            logsumexp_al = logsumexp(logal, dim=0)
 
-        return logsumexp_al, al
+        p_h_x = dist.independent.Independent(dist.normal.Normal(self.mus, sigs), 1)
 
+        log_p_h_x = p_h_x.log_prob(h.unsqueeze(1))
+
+        al = torch.ones_like(tranmat[0]) / tranmat.shape[0]
+        for t in range(h.size(0)):
+            log_al = (1e-20 + torch.matmul(tranmat, al)).log() + log_p_h_x[t]
+            al = F.softmax(log_al)
+
+        return torch.logsumexp(log_al, 0)
 
 
     def VAE_trainer(self, cuda, train_loader, joint_training, 
@@ -396,11 +391,10 @@ class VAE(nn.Module):
 
                 # generator gradient
                 self.zero_grad()
-                out_g, mu, logvar, h = self.forward(tar)
                 if joint_training:
-                    err_G = self.criterion_jointhmm(out_g, tar, mu, logvar, ep) 
+                    err_G = self.criterion_jointhmm(tar)
                 else:
-                    err_G = self.criterion(out_g, tar, mu, logvar)
+                    err_G = self.criterion(tar)
                 err_G = err_G.mean(0)
 
                 err_G.backward()
