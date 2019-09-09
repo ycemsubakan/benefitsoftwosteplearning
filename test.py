@@ -146,14 +146,14 @@ elif args.measure == 'nll':
 
     with open(f'{model_dir}/nelbo.csv', 'w') as f:
         writer = csv.DictWriter(f, fieldnames=['k', 'mode', 'seed', 'train_nll', 'test_nll'])
-        writer.writeheader({
+        writer.writeheader()
+        writer.writerow({
             'k': args.k,
             'mode': args.mode,
             'seed': args.seed,
             'train_nll': train_nll,
             'test_nll': test_nll,
             })
-        writer.writerow()
 
 # gen_data, seed = mdl.generate_data(1000, args)
 # gen_data_concat = ut.pt_to_audio_overlap(gen_data)
