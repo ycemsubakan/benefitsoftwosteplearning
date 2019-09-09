@@ -299,20 +299,20 @@ class VAE(nn.Module):
 
         # p(h|x)
         mu, logvar = self.encode(x.unsqueeze(1))
-        p_h_x = dist.independent.Independent(dist.normal.Normal(mu, logvar.exp()), 1)
+        q_h_x = dist.independent.Independent(dist.normal.Normal(mu, logvar.exp()), 1)
 
-        # h ~ p(h|x)
-        h = p_h_x.rsample()
+        # h ~ q(h|x)
+        h = q_h_x.rsample()
 
         # p(x|h)
         xhat = self.decode(h.unsqueeze(-1)).squeeze(1)
-        q_x_h = dist.independent.Independent(dist.laplace.Laplace(xhat, 1), 1)
+        p_x_h = dist.independent.Independent(dist.laplace.Laplace(xhat, 1), 1)
 
         # p(h)
         p_h = dist.independent.Independent(dist.normal.Normal(torch.zeros_like(mu), torch.ones_like(logvar)), 1)
 
-        # loss = - q_x_h.log_prob(x) + p_h_x.log_prob(h) - p_h.log_prob(h)  # stochastic
-        loss = - q_x_h.log_prob(x) + dist.kl.kl_divergence(p_h_x, p_h)  # exact
+        # loss = - p_x_h.log_prob(x) + q_h_x.log_prob(h) - p_h.log_prob(h)  # stochastic
+        loss = - p_x_h.log_prob(x) + dist.kl.kl_divergence(q_h_x, p_h)  # exact
         loss = loss.sum(0).view((1, ))  # batch is a single sample
 
         return loss
@@ -378,7 +378,7 @@ class VAE(nn.Module):
             log_al = (1e-20 + torch.matmul(tranmat, al)).log() + log_p_x_c.t()
             al = F.softmax(log_al, dim=0)
 
-        return torch.logsumexp(log_al, 0)
+        return -torch.logsumexp(log_al, 0)
 
 
     def VAE_trainer(self, cuda, train_loader, joint_training, 

@@ -35,27 +35,13 @@ args.num_gpus = 1
 learning_rate = 1e-5  # learning rate
 EP = 200  # number of learning epochs
 base_inits = 20  # for GMM init (not used)
-Kdict = 100  # number of hidden states in the hmm p(c_t|c_{t-1})
+K = 100  # number of latent dimensions in the autoencoder
+Kdict = args.k  # number of hidden states in the hmm p(c_t|c_{t-1})
 L = 800  # observation dimensionality p(x|h)
 
 np.random.seed(args.seed)
 torch.manual_seed(np.random.randint(np.iinfo(int).max))
 args.cuda = torch.cuda.is_available()
-
-train_data, test_data = ut.preprocess_audio_files(args, overlap=True)
-
-print(f"{len(train_data)} training samples")
-print(f"{len(test_data)} test samples")
-
-train_loader= torch.utils.data.DataLoader(train_data, batch_size=args.batch_size, shuffle=False)
-
-mdl = audionet(L, args.k, 1, 1, 1, base_inits=base_inits, Kdict=Kdict, 
-               base_dist='HMM', 
-               num_gpus=args.num_gpus, 
-               usecuda=args.cuda)
-
-if args.cuda:
-    mdl.cuda()
 
 # early check
 if args.mode == 'combined':
@@ -68,6 +54,21 @@ model_dir = f'models/K_{args.k}/{args.seed}/{args.mode}'
 os.makedirs(model_dir, exist_ok=False)
 
 path = f'{model_dir}/audionet.t'
+
+mdl = audionet(L, K, 1, 1, 1, base_inits=base_inits, Kdict=Kdict, 
+               base_dist='HMM', 
+               num_gpus=args.num_gpus, 
+               usecuda=args.cuda)
+
+if args.cuda:
+    mdl.cuda()
+
+train_data, test_data = ut.preprocess_audio_files(args, overlap=True)
+
+print(f"{len(train_data)} training samples")
+print(f"{len(test_data)} test samples")
+
+train_loader= torch.utils.data.DataLoader(train_data, batch_size=args.batch_size, shuffle=False)
 
 if args.mode == '2step':
 

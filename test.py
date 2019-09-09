@@ -35,7 +35,8 @@ args.batch_size = 200
 args.data = 'synthetic_sounds' 
 args.num_gpus = 1
 
-Kdict = 100  # number of hidden states in the hmm p(c_t|c_{t-1})
+K = 100  # number of latent dimensions in the autoencoder
+Kdict = args.k  # number of hidden states in the hmm p(c_t|c_{t-1})
 L = 800  # observation dimensionality p(x|h)
 
 np.random.seed(args.seed)
@@ -50,7 +51,7 @@ print(f"{len(test_data)} test samples")
 train_loader= torch.utils.data.DataLoader(train_data, batch_size=args.batch_size, shuffle=False)
 test_loader= torch.utils.data.DataLoader(test_data, batch_size=args.batch_size, shuffle=False)
 
-mdl = audionet(L, args.k, 1, 1, 1,
+mdl = audionet(L, K, 1, 1, 1,
         Kdict=Kdict, 
         base_dist='HMM', 
         num_gpus=args.num_gpus, 
@@ -87,7 +88,7 @@ def risk_elbo(model, dataloader, cuda, n_samples=10, verbose=False):
             empirical_risk += (loss_enc + loss_dec + loss_prior).item()
 
         if verbose:
-            print(f"losses: dec={loss_dec.item():.2f} KL={(loss_enc + loss_prior).item():.2f}")
+            print(f"losses: dec={loss_dec.item():.2f} KL={(loss_enc + loss_prior).item():.2f} ({loss_enc.item():.2f} {loss_prior.item():.2f})")
 
     empirical_risk /= len(dataloader)
 
@@ -144,7 +145,7 @@ elif args.measure == 'nll':
 
     print(f"NLL:   train={train_nll:.2f} test={test_nll:.2f}")
 
-    with open(f'{model_dir}/nelbo.csv', 'w') as f:
+    with open(f'{model_dir}/nll.csv', 'w') as f:
         writer = csv.DictWriter(f, fieldnames=['k', 'mode', 'seed', 'train_nll', 'test_nll'])
         writer.writeheader()
         writer.writerow({
