@@ -63,7 +63,7 @@ mdl = audionet(L, K, 1, 1, 1, base_inits=base_inits, Kdict=Kdict,
 if args.cuda:
     mdl.cuda()
 
-train_data, test_data = ut.preprocess_audio_files(args, overlap=True)
+train_data, test_data, _ = ut.preprocess_audio_files(args, overlap=True)
 
 print(f"{len(train_data)} training samples")
 print(f"{len(test_data)} test samples")

@@ -5,7 +5,7 @@ import os
 argparser = argparse.ArgumentParser()
 argparser.add_argument('mode', help='training mode', choices=['2step', 'joint', 'combined'])
 argparser.add_argument('k', help='number of latent dimensions in the autoencoder', type=int)
-argparser.add_argument('measure', help='what to measure', choices=('nll', 'elbo'))
+argparser.add_argument('measure', help='what to measure', choices=('nll', 'elbo', 'spectro'))
 argparser.add_argument('-s', '--seed', type=int, help='random seed', default=0)
 argparser.add_argument('-g', '--gpu', type=int, help='GPU id', default=-1)
 
@@ -26,6 +26,7 @@ import pickle
 import librosa
 import itertools as it
 import csv
+import librosa as lr
 
 vis = visdom.Visdom(port=5800, server='http://cem@nmf.cs.illinois.edu', env='cem_dev2')
 assert vis.check_connection()
@@ -43,13 +44,19 @@ np.random.seed(args.seed)
 torch.manual_seed(np.random.randint(np.iinfo(int).max))
 args.cuda = torch.cuda.is_available()
 
-train_data, test_data = ut.preprocess_audio_files(args, overlap=True)
+model_dir = f'models/K_{args.k}/{args.seed}/{args.mode}'
+vae_weights = f'{model_dir}/audionet.t'
+hmm_weights = f'{model_dir}/audionet.t.hmm'
+
+assert os.path.exists(vae_weights)
+assert os.path.exists(hmm_weights)
+
+train_data, test_data, wf = ut.preprocess_audio_files(args, overlap=True)
+train_loader= torch.utils.data.DataLoader(train_data, batch_size=args.batch_size, shuffle=False)
+test_loader= torch.utils.data.DataLoader(test_data, batch_size=args.batch_size, shuffle=False)
 
 print(f"{len(train_data)} training samples")
 print(f"{len(test_data)} test samples")
-
-train_loader= torch.utils.data.DataLoader(train_data, batch_size=args.batch_size, shuffle=False)
-test_loader= torch.utils.data.DataLoader(test_data, batch_size=args.batch_size, shuffle=False)
 
 mdl = audionet(L, K, 1, 1, 1,
         Kdict=Kdict, 
@@ -59,13 +66,6 @@ mdl = audionet(L, K, 1, 1, 1,
 
 if args.cuda:
     mdl.cuda()
-
-model_dir = f'models/K_{args.k}/{args.seed}/{args.mode}'
-vae_weights = f'{model_dir}/audionet.t'
-hmm_weights = f'{model_dir}/audionet.t.hmm'
-
-assert os.path.exists(vae_weights)
-assert os.path.exists(hmm_weights)
 
 mdl.load_state_dict(torch.load(vae_weights))
 mdl.HMM = pickle.load(open(hmm_weights, 'rb'))
@@ -156,6 +156,35 @@ elif args.measure == 'nll':
             'test_nll': test_nll,
             })
 
+elif args.measure == 'spectro':
+
+    gen_data, seed = mdl.generate_data(1000, args)
+    gen_data_concat = ut.pt_to_audio_overlap(gen_data)
+
+    Tstart = 120000
+    Tmax = 120000*2
+    pw = .3
+    # plt.subplot(2, 1, 1)
+    spec = np.abs(lr.stft(wf[Tstart:Tmax]))**pw
+    lr.display.specshow(spec, sr=8000, y_axis='log', x_axis='time')
+    plt.title('Original Data')
+
+    plt.savefig(f"{model_dir}/spectrogram_original.eps", format='eps')
+    plt.savefig(f"{model_dir}/spectrogram_original.png", format='png')
+
+    # plt.subplot(2, 1, 2)
+    spec = np.abs(lr.stft(gen_data_concat[Tstart:Tmax]))**pw
+    lr.display.specshow(spec, sr=8000, y_axis='log', x_axis='time')
+    if args.mode == '2step':
+        plt.title('Two-step training')
+    elif args.mode == 'joint':
+        plt.title('Joint training')
+    elif args.mode == 'combined':
+        plt.title('Combined training')
+
+    plt.savefig(f"{model_dir}/spectrogram_{args.mode}.eps", format='eps')
+    plt.savefig(f"{model_dir}/spectrogram_{args.mode}.png", format='png')
+
 # gen_data, seed = mdl.generate_data(1000, args)
 # gen_data_concat = ut.pt_to_audio_overlap(gen_data)
 # librosa.output.write_wav(f'{model_dir}/sample.wav', gen_data_concat, 8000, norm=True)
@@ -170,22 +199,3 @@ elif args.measure == 'nll':
 #             win='hhat-gen',
 #             opts={'title': 'Generated hhat'})
 
-# # do some plotting here
-# imagepath = 'samples'
-# if not os.path.exists(imagepath):
-#     os.mkdir(imagepath)
-# 
-# Tstart = 120000
-# Tmax = 120000*2
-# pw = .3
-# plt.subplot(2, 1, 1)
-# spec = np.abs(lr.stft(wf[Tstart:Tmax]))**pw
-# lr.display.specshow(spec, sr=8000, y_axis='log', x_axis='time')
-# plt.title('Original Data')
-# 
-# plt.subplot(2, 1, 2)
-# spec = np.abs(lr.stft(gen_data_concat[Tstart:Tmax]))**pw
-# lr.display.specshow(spec, sr=8000, y_axis='log', x_axis='time')
-# plt.title('Generated Data')
-# 
-# plt.savefig(imagepath + '/{}.eps'.format(args.data), format='eps')

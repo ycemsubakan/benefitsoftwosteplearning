@@ -663,7 +663,7 @@ def preprocess_audio_files(arguments, overlap=False):
     train_data = data_utils.Subset(dataset, range(ntrain))
     test_data = data_utils.Subset(dataset, range(ntrain, len(dataset)))
 
-    return train_data, test_data
+    return train_data, test_data, wf_hat
 
 def pt_to_audio_overlap(data):
     '''
