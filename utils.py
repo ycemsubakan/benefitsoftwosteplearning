@@ -589,7 +589,7 @@ def preprocess_audio_files(arguments, overlap=False):
         lens1 = [] 
         inds = []
         for i, fl1 in enumerate(files_source1):
-            print(i, fl1)
+            # print(i, fl1)
             #fs, wavfl1 = sp.io.wavfile.read((os.path.join(audio_path, fl1)))
             wavfl1, fs = lr.load(os.path.join(audio_path, fl1), sr=8000)
 
@@ -659,9 +659,11 @@ def preprocess_audio_files(arguments, overlap=False):
     #arguments.fs = 16000 #fs  # add the sampling rate here
 
     kwargs = {'num_workers': arguments.num_gpus, 'pin_memory': True} if arguments.cuda else {}
-    loader = data_utils.DataLoader(dataset, batch_size=arguments.batch_size, shuffle=False, **kwargs)
+    ntrain = (int(0.7 * len(dataset)) // arguments.batch_size) * arguments.batch_size
+    train_data = data_utils.Subset(dataset, range(ntrain))
+    test_data = data_utils.Subset(dataset, range(ntrain, len(dataset)))
 
-    return loader, wf_hat
+    return train_data, test_data
 
 def pt_to_audio_overlap(data):
     '''

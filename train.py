@@ -42,7 +42,12 @@ np.random.seed(args.seed)
 torch.manual_seed(np.random.randint(np.iinfo(int).max))
 args.cuda = torch.cuda.is_available()
 
-train_loader, wf = ut.preprocess_audio_files(args, overlap=True)
+train_data, test_data = ut.preprocess_audio_files(args, overlap=True)
+
+print(f"{len(train_data)} training samples")
+print(f"{len(test_data)} test samples")
+
+train_loader= torch.utils.data.DataLoader(train_data, batch_size=args.batch_size, shuffle=False)
 
 mdl = audionet(L, args.k, 1, 1, 1, base_inits=base_inits, Kdict=Kdict, 
                base_dist='HMM', 
@@ -51,6 +56,13 @@ mdl = audionet(L, args.k, 1, 1, 1, base_inits=base_inits, Kdict=Kdict,
 
 if args.cuda:
     mdl.cuda()
+
+# early check
+if args.mode == 'combined':
+
+    path_init = f'models/K_{args.k}/{args.seed}/2step/audionet.t'
+    assert os.path.exists(path_init)
+    assert os.path.exists(path_init + '.hmm')
 
 model_dir = f'models/K_{args.k}/{args.seed}/{args.mode}'
 os.makedirs(model_dir, exist_ok=False)
@@ -78,8 +90,6 @@ elif args.mode == 'joint':
 elif args.mode == 'combined':
 
     path_init = f'models/K_{args.k}/{args.seed}/2step/audionet.t'
-    assert os.path.exists(path_init)
-    assert os.path.exists(path_init + '.hmm')
 
     mdl.load_state_dict(torch.load(path_init))
     mdl.HMM = pickle.load(open(path_init + '.hmm', 'rb'))

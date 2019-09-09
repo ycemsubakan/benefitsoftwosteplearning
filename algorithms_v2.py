@@ -304,51 +304,79 @@ class VAE(nn.Module):
         # h ~ p(h|x)
         h = p_h_x.rsample()
 
-        # p(x|x)
+        # p(x|h)
         xhat = self.decode(h.unsqueeze(-1)).squeeze(1)
-        p_x_h = dist.independent.Independent(dist.laplace.Laplace(xhat, 1), 1)
+        q_x_h = dist.independent.Independent(dist.laplace.Laplace(xhat, 1), 1)
 
         # p(h)
         p_h = dist.independent.Independent(dist.normal.Normal(torch.zeros_like(mu), torch.ones_like(logvar)), 1)
 
-        # loss = - p_x_h.log_prob(x) + p_h_x.log_prob(h) - p_h.log_prob(h)
-        loss = - p_x_h.log_prob(x) + dist.kl.kl_divergence(p_h_x, p_h)
+        # loss = - q_x_h.log_prob(x) + p_h_x.log_prob(h) - p_h.log_prob(h)  # stochastic
+        loss = - q_x_h.log_prob(x) + dist.kl.kl_divergence(p_h_x, p_h)  # exact
+        loss = loss.sum(0).view((1, ))  # batch is a single sample
 
         return loss
 
-    def criterion_jointhmm(self, x):
+    def criterion_jointhmm(self, x, n_samples=1, decouple=False):
         x = x.squeeze(1)
 
         # p(h|x)
         mu, logvar = self.encode(x.unsqueeze(1))
-        p_h_x = dist.independent.Independent(dist.normal.Normal(mu, logvar.exp()), 1)
+        q_h_x = dist.independent.Independent(dist.normal.Normal(mu, logvar.exp()), 1)
 
         # h ~ p(h|x)
-        h = p_h_x.rsample()
+        h = q_h_x.rsample((n_samples, ))
 
-        # p(x|x)
-        xhat = self.decode(h.unsqueeze(-1)).squeeze(1)
+        # p(x|h)
+        xhat = self.decode(h.view((-1, 1, h.shape[-1]))).view((h.shape[0], h.shape[1], -1))
         p_x_h = dist.independent.Independent(dist.laplace.Laplace(xhat, 1), 1)
 
-        # p(h)
-        p_h = dist.independent.Independent(dist.normal.Normal(torch.zeros_like(mu), torch.ones_like(logvar)), 1)
+        # negative ELBO: E_q(h|x) [ - log p(x|h) + KL(q(h|x) || p(h)) ]
+        loss_dec = - p_x_h.log_prob(x).mean(0).sum(0).view((1,))
+        # loss_enc = q_h_x.log_prob(h).mean(0).sum(0).view((1,))  # stochastic
+        loss_enc = - q_h_x.entropy().sum(0).view((1,))  # exact
+        loss_prior = - self.hmm_alpha_recursion(h).mean(0).view((1,))
 
-        loss = - p_x_h.log_prob(x) + p_h_x.log_prob(h) - self.hmm_alpha_recursion(h)
+        if decouple:
+            return loss_dec, loss_enc, loss_prior
+        else:
+            return loss_dec + loss_enc + loss_prior
 
-        return loss
 
     def hmm_alpha_recursion(self, h):
         tranmat = F.softmax(self.A, dim=0)
         sigs = F.softplus(self.sigs)
 
-        p_h_x = dist.independent.Independent(dist.normal.Normal(self.mus, sigs), 1)
+        p_h_c = dist.independent.Independent(dist.normal.Normal(self.mus, sigs), 1)
+        log_p_h_c = p_h_c.log_prob(h.unsqueeze(2))
 
-        log_p_h_x = p_h_x.log_prob(h.unsqueeze(1))
+        al = torch.ones_like(tranmat[0]).view((-1, 1)).expand((-1, h.shape[0])) / tranmat.shape[0]
+        for t in range(h.shape[1]):
+            log_al = (1e-20 + torch.matmul(tranmat, al)).log() + log_p_h_c[:, t].t()
+            al = F.softmax(log_al, dim=0)
+
+        return torch.logsumexp(log_al, 0)
+
+
+    def criterion_nll(self, x, n_samples=1):
+        x = x.squeeze(1)
+
+        tranmat = F.softmax(self.A, dim=0)
+
+        p_h_c = dist.independent.Independent(dist.normal.Normal(self.mus, F.softplus(self.sigs)), 1)
 
         al = torch.ones_like(tranmat[0]) / tranmat.shape[0]
-        for t in range(h.size(0)):
-            log_al = (1e-20 + torch.matmul(tranmat, al)).log() + log_p_h_x[t]
-            al = F.softmax(log_al)
+        for t in range(x.shape[0]):
+            # h ~ p(h|r)
+            h = p_h_c.rsample((n_samples, ))
+
+            # p(x|h)
+            xhat = self.decode(h.view((-1, 1, h.shape[-1]))).view((h.shape[0], h.shape[1], -1))
+            p_x_h = dist.independent.Independent(dist.laplace.Laplace(xhat, 1), 1)
+            log_p_x_c = p_x_h.log_prob(x[t].view((1, 1, x.shape[1]))).mean(0)
+
+            log_al = (1e-20 + torch.matmul(tranmat, al)).log() + log_p_x_c.t()
+            al = F.softmax(log_al, dim=0)
 
         return torch.logsumexp(log_al, 0)
 
@@ -377,7 +405,7 @@ class VAE(nn.Module):
         elif optimizer == 'LBFGS':
             optimizerG = optim.LBFGS(self.parameters(), lr=lr)
 
-        nbatches = 1400
+        nbatches = None
         for ep in range(EP):
             for i, (dt, tar, _) in enumerate(it.islice(train_loader, 0, nbatches, 1)):
                 if cuda:
