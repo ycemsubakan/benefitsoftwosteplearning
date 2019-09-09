@@ -322,19 +322,19 @@ class VAE(nn.Module):
 
         # p(h|x)
         mu, logvar = self.encode(x.unsqueeze(1))
-        q_h_x = dist.independent.Independent(dist.normal.Normal(mu, logvar.exp()), 1)
+        q_h_x = dist.independent.Independent(dist.normal.Normal(mu, logvar.exp()), 2)
 
         # h ~ p(h|x)
         h = q_h_x.rsample((n_samples, ))
 
         # p(x|h)
         xhat = self.decode(h.view((-1, 1, h.shape[-1]))).view((h.shape[0], h.shape[1], -1))
-        p_x_h = dist.independent.Independent(dist.laplace.Laplace(xhat, 1), 1)
+        p_x_h = dist.independent.Independent(dist.laplace.Laplace(xhat, 1), 2)
 
         # negative ELBO: E_q(h|x) [ - log p(x|h) + KL(q(h|x) || p(h)) ]
-        loss_dec = - p_x_h.log_prob(x).mean(0).sum(0).view((1,))
+        loss_dec = - p_x_h.log_prob(x).mean(0).view((1,))
         # loss_enc = q_h_x.log_prob(h).mean(0).sum(0).view((1,))  # stochastic
-        loss_enc = - q_h_x.entropy().sum(0).view((1,))  # exact
+        loss_enc = - q_h_x.entropy().view((1,))  # exact
         loss_prior = - self.hmm_alpha_recursion(h).mean(0).view((1,))
 
         if decouple:

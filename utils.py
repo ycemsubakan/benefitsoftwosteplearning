@@ -659,7 +659,7 @@ def preprocess_audio_files(arguments, overlap=False):
     #arguments.fs = 16000 #fs  # add the sampling rate here
 
     kwargs = {'num_workers': arguments.num_gpus, 'pin_memory': True} if arguments.cuda else {}
-    ntrain = (int(0.7 * len(dataset)) // arguments.batch_size) * arguments.batch_size
+    ntrain = int(0.8 * len(dataset))
     train_data = data_utils.Subset(dataset, range(ntrain))
     test_data = data_utils.Subset(dataset, range(ntrain, len(dataset)))
 
