@@ -3,7 +3,7 @@ import os
 
 # Parse command line args
 argparser = argparse.ArgumentParser()
-argparser.add_argument('mode', help='training mode', choices=['2step', 'joint', 'combined'])
+argparser.add_argument('mode', help='training mode', choices=['2step', 'joint', 'combined', 'reversed'])
 argparser.add_argument('k', help='number of latent dimensions in the autoencoder', type=int)
 argparser.add_argument('-s', '--seed', type=int, help='random seed', default=0)
 argparser.add_argument('-g', '--gpu', type=int, help='GPU id', default=-1)
@@ -50,6 +50,12 @@ if args.mode == 'combined':
     assert os.path.exists(path_init)
     assert os.path.exists(path_init + '.hmm')
 
+if args.mode == 'reversed':
+
+    path_init = f'models/K_{args.k}/{args.seed}/joint/audionet.t'
+    assert os.path.exists(path_init)
+    assert os.path.exists(path_init + '.hmm')
+
 model_dir = f'models/K_{args.k}/{args.seed}/{args.mode}'
 os.makedirs(model_dir, exist_ok=False)
 
@@ -90,8 +96,6 @@ elif args.mode == 'joint':
 
 elif args.mode == 'combined':
 
-    path_init = f'models/K_{args.k}/{args.seed}/2step/audionet.t'
-
     mdl.load_state_dict(torch.load(path_init))
     mdl.HMM = pickle.load(open(path_init + '.hmm', 'rb'))
 
@@ -117,6 +121,41 @@ elif args.mode == 'combined':
     # print()
     # print(F.softplus(mdl.sigs.data)[0, :10])
     # print(mdl.HMM.covars_[0, :10, :10])
+
+elif args.mode == 'reversed':
+
+    mdl.load_state_dict(torch.load(path_init))
+    # mdl.HMM = pickle.load(open(path_init + '.hmm', 'rb'))
+
+    # mdl.pt_to_np_HMM()
+    # import torch
+    # import torch.nn.functional as F
+    # print()
+    # print(F.softmax(mdl.A.data.t(), dim=1)[:10, :10])
+    # print(mdl.HMM.transmat_[:10, :10])
+    # print()
+    # print(mdl.mus.data[:10, :10])
+    # print(mdl.HMM.means_[:10, :10])
+    # print()
+    # print(F.softplus(mdl.sigs.data)[0, :10])
+    # print(np.diagonal(mdl.HMM.covars_[0, :10, :10]))
+    # mdl.np_to_pt_HMM()
+    # import torch
+    # import torch.nn.functional as F
+    # print()
+    # print(F.softmax(mdl.A.data.t(), dim=1)[:10, :10])
+    # print(mdl.HMM.transmat_[:10, :10])
+    # print()
+    # print(mdl.mus.data[:10, :10])
+    # print(mdl.HMM.means_[:10, :10])
+    # print()
+    # print(F.softplus(mdl.sigs.data)[0, :10])
+    # print(np.diagonal(mdl.HMM.covars_[0, :10, :10]))
+    # raise Exception
+
+    # do extra training
+    mdl.base_dist_trainer(train_loader, args.cuda, vis=vis)
+
 
 torch.save(mdl.state_dict(), path)
 pickle.dump(mdl.HMM, open(path + '.hmm', 'wb'))

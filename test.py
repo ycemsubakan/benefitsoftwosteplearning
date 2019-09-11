@@ -3,7 +3,7 @@ import os
 
 # Parse command line args
 argparser = argparse.ArgumentParser()
-argparser.add_argument('mode', help='training mode', choices=['2step', 'joint', 'combined'])
+argparser.add_argument('mode', help='training mode', choices=['2step', 'joint', 'combined', 'reversed'])
 argparser.add_argument('k', help='number of latent dimensions in the autoencoder', type=int)
 argparser.add_argument('measure', help='what to measure', choices=('nll', 'elbo', 'spectro'))
 argparser.add_argument('-s', '--seed', type=int, help='random seed', default=0)
@@ -160,21 +160,25 @@ elif args.measure == 'spectro':
 
     gen_data, seed = mdl.generate_data(1000, args)
     gen_data_concat = ut.pt_to_audio_overlap(gen_data)
+    librosa.output.write_wav(f'{model_dir}/sample.wav', gen_data_concat, 8000, norm=True)
 
     Tstart = 120000
     Tmax = 120000*2
     pw = .3
-    # plt.subplot(2, 1, 1)
+    figsize = (3, 1.5)
+    plt.figure(figsize=figsize)
     spec = np.abs(lr.stft(wf[Tstart:Tmax]))**pw
     lr.display.specshow(spec, sr=8000, y_axis='log', x_axis='time')
+    plt.xlabel("Time (s)")
     plt.title('Original Data')
 
-    plt.savefig(f"{model_dir}/spectrogram_original.eps", format='eps')
-    plt.savefig(f"{model_dir}/spectrogram_original.png", format='png')
+    plt.savefig(f"{model_dir}/spectrogram_original.eps", format='eps', bbox_inches='tight')
+    plt.savefig(f"{model_dir}/spectrogram_original.png", format='png', bbox_inches='tight')
 
-    # plt.subplot(2, 1, 2)
+    plt.figure(figsize=figsize)
     spec = np.abs(lr.stft(gen_data_concat[Tstart:Tmax]))**pw
     lr.display.specshow(spec, sr=8000, y_axis='log', x_axis='time')
+    plt.xlabel("Time (s)")
     if args.mode == '2step':
         plt.title('Two-step training')
     elif args.mode == 'joint':
@@ -182,12 +186,8 @@ elif args.measure == 'spectro':
     elif args.mode == 'combined':
         plt.title('Combined training')
 
-    plt.savefig(f"{model_dir}/spectrogram_{args.mode}.eps", format='eps')
-    plt.savefig(f"{model_dir}/spectrogram_{args.mode}.png", format='png')
-
-# gen_data, seed = mdl.generate_data(1000, args)
-# gen_data_concat = ut.pt_to_audio_overlap(gen_data)
-# librosa.output.write_wav(f'{model_dir}/sample.wav', gen_data_concat, 8000, norm=True)
+    plt.savefig(f"{model_dir}/spectrogram_{args.mode}.eps", format='eps', bbox_inches='tight')
+    plt.savefig(f"{model_dir}/spectrogram_{args.mode}.png", format='png', bbox_inches='tight')
 
 # if vis is not None:
 #     vis.line(gen_data.squeeze()[:3].t().data.cpu(),
