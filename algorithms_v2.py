@@ -1789,7 +1789,8 @@ class audionet(VAE):
         eps = 0  # 1e-6
         self.A.data.copy_((torch.from_numpy(self.HMM.transmat_).t() + eps).log().float())  # reversed softmax
         self.mus.data.copy_(torch.from_numpy(self.HMM.means_).float())
-        self.sigs.data.copy_((torch.from_numpy(self.HMM.covars_).sum(-1).exp() - 1).log().float())  # reversed softplus
+        covars = torch.from_numpy(self.HMM.covars_.diagonal(0, 1, 2)).float()
+        self.sigs.data.copy_(torch.where(covars > 20, covars, (covars.exp() - 1).log())) # reversed softplus (with numerical stability)
 
     def pt_to_np_HMM(self):
         self.HMM.transmat_ = F.softmax(self.A.t(), dim=1).data.cpu().numpy()
