@@ -51,9 +51,10 @@ def log_Normal_standard(x, average=False, dim=None):
 
 
 class VAE(nn.Module):
-    def __init__(self, L1, L2, Ks, M, outlin='sigmoid'):
+    def __init__(self, L1, L2, Ks, M, arguments=None, outlin='sigmoid', toy_data=False):
         super(VAE, self).__init__()
 
+        self.arguments = arguments
         self.L1 = L1
         self.L2 = L2
         self.Ks = Ks
@@ -61,6 +62,7 @@ class VAE(nn.Module):
         self.base_dist = 'fixed_iso_gauss'
         self.outlin = outlin
         self.joint_tr = False
+        self.toy_data = toy_data
 
         self.fc1 = nn.Linear(self.L1, self.Ks[1])
         #initializationhelper(self.fc1, 'relu')
@@ -81,7 +83,7 @@ class VAE(nn.Module):
             
     def initialize_GMMparams(self, GMM=None, mode='GMMinit'): 
         if mode == 'random':
-            Kmog = 10
+            Kmog = 50
 
             self.Kmog = Kmog
             self.mus = nn.Parameter(1*torch.randn(self.Ks[0], Kmog))
@@ -124,7 +126,9 @@ class VAE(nn.Module):
         h = self.reparameterize(mu, logvar)
 
         #print('mean of mu {} variance of mu {}'.format(torch.mean(h).data[0], torch.var(h).data[0]))
-        return self.decode(h.unsqueeze(-1)), mu, logvar, h
+        if not self.toy_data:
+            h = h.unsqueeze(-1)
+        return self.decode(h), mu, logvar, h
 
     def criterion(self, recon_x, x, mu, logvar):
         eps = 1e-20
@@ -144,15 +148,16 @@ class VAE(nn.Module):
         KLD = -0.5 * torch.sum(1 + logvar - ((mu.pow(2) + logvar.exp())/v), 1)
         # Normalise by same number of elements as in reconstruction
         #KLD = KLD /(x.size(0) * x.size(1))
-        return BCE + KLD
 
-    def criterion_mog(self, recon_x, x, mu, logvar, data='mnist'):
+        return BCE + 0.1*KLD
+
+    def criterion_mog(self, recon_x, x, mu, logvar, beta):
         eps = 1e-20
         recon_x = recon_x.view(-1, self.L2)
         x = x.view(-1, self.L2)
-        if data == 'celeba':
+        if self.arguments.data in ['celeba', 'gaussian_toy']:
             crt = lambda xhat, tar: torch.sum(((xhat - tar).abs() ), 1)
-        elif data == 'mnist':
+        elif self.arguments.data == 'mnist':
             crt = lambda xhat, tar: -torch.sum(tar*torch.log(xhat+eps) + (1-tar)*torch.log(1-xhat+eps), 1)
         else:
             raise ValueError('What Data?')
@@ -162,7 +167,11 @@ class VAE(nn.Module):
         loss1 = -((self.mus.unsqueeze(0) - mu.unsqueeze(-1))**2)/self.sigs.unsqueeze(0) - self.sigs.log().unsqueeze(0) 
         loss2 = -(logvar.unsqueeze(-1) - self.sigs.log().unsqueeze(0)).exp()
 
-        zs = mu + torch.randn(mu.size()).cuda() * (0.5*logvar).exp()
+        noise = torch.randn(mu.size())
+        if self.arguments.cuda:
+            noise = noise.cuda()
+
+        zs = mu + noise * (0.5*logvar).exp()
         resp = F.softmax( (-(0.5*(self.mus.unsqueeze(0) - zs.unsqueeze(-1))**2)/self.sigs.unsqueeze(0)).sum(1) - 0.5*self.sigs.log().sum(0).unsqueeze(0) + self.pis.unsqueeze(0).log(), dim=-1)
 
         term1 = 0.5*((loss1 + loss2).sum(1) * resp).sum(-1)
@@ -170,7 +179,7 @@ class VAE(nn.Module):
         term2 = (resp * (torch.log(self.pis).unsqueeze(0) - torch.log(resp+eps))).sum(1)  \
                 + 0.5 * (1 + logvar).sum(1)  
 
-        NELBO =  - term1 - term2 + BCE
+        NELBO =  (- term1 - term2) * beta + BCE
         
         return NELBO
 
@@ -251,7 +260,11 @@ class VAE(nn.Module):
                 self.zero_grad()
                 out_g, mu, logvar, h = self.forward(tar)
                 
-                err_G = self.criterion_mog(out_g, tar, mu, logvar, data)
+                if self.arguments.data in ['celeba', 'mnist']:
+                    beta = 1
+                else: 
+                    beta = 0.1
+                err_G = self.criterion_mog(out_g, tar, mu, logvar, beta=beta) #( (ep)+1) /EP)
                 err_G = err_G.mean(0)
 
                 err_G.backward(retain_graph=True)
@@ -260,17 +273,22 @@ class VAE(nn.Module):
                 optimizerG.step()
                 self.pis.data = self.pis.data.abs() / self.pis.data.abs().sum()
 
-                print('EP [{}/{}], error = {}, batch = [{}/{}], config num {}'.format(ep+1, EP, err_G.data[0], i+1, len(train_loader), config_num))
+                print('EP [{}/{}], error = {}, batch = [{}/{}], config num {}'.format(ep+1, EP, err_G.item(), 
+                                                                            i+1, len(train_loader), config_num))
                                                                        
                 if data == 'mnist':
                     per = 10
                 elif data == 'celeba':
                     per = 2
                 else:
-                    per = 10 
+                    per = 50 
+
+                if self.arguments.data == 'gaussian_toy' and (ep % 50 == 0): 
+                    vis.scatter(tar, win='target')
+                    vis.scatter(out_g, win='output')
 
 
-                if (ep % per) == 0 and i == 0:
+                if self.arguments.data == 'celeba' and ((i % 50) == 0):
                     # visdom plots
                     # generate samples 
 
@@ -280,38 +298,17 @@ class VAE(nn.Module):
                     gen_data, seed = self.generate_data(N, base_dist='mog')
                     self.train(mode=True)
 
-                    if 1:
-                        opts={}
-                        opts['title'] = 'Generated Images'
-                        vis.images(gen_data.data.cpu()*0.5 + 0.5, opts=opts, win='vade')
-                        
-                        opts['title'] = 'Approximations'
-                        vis.images(0.5*out_g.data.cpu() + 0.5, opts=opts, win='vae_approximations')
-                        opts['title'] = 'Input images'
-                        vis.images(tar.data.cpu()*0.5 + 0.5, opts=opts, win='vae_x')
+                    opts={}
+                    opts['title'] = 'Generated Images'
+                    vis.images(gen_data.data.cpu()*0.5 + 0.5, opts=opts, win='vade')
+            #        
+                    opts['title'] = 'Approximations'
+                    vis.images(0.5*out_g.data.cpu() + 0.5, opts=opts, win='vae_approximations')
+                    opts['title'] = 'Input images'
+                    vis.images(tar.data.cpu()*0.5 + 0.5, opts=opts, win='vae_x')
 
 
-                    elif 0:
-                                                
-                        sz = 800
-                        opts={'width':sz, 'height':sz, 'xmax':1.5}
-                        gen_images = ut.collate_images(out_g, N=N)
-                        opts['title'] = 'VAE Approximations'
-                        vis.heatmap(gen_images, opts=opts, win='vae_approximations')
-                        
-                        input_images = ut.collate_images(tar, N) 
-                        opts['title'] = 'VAE Input images'
-                        vis.heatmap(input_images, opts=opts, win='vae_x')
-
-                        gen_images = ut.collate_images(gen_data, N)
-                        opts['title'] = 'VAE Generated Images'
-                        vis.heatmap(gen_images, opts=opts, win='vae_gen_data')
-
-                        means = self.decode(self.mus.t())
-                        mean_images = ut.collate_images(means, N=self.Kmog)
-                        opts['title'] = 'cluster center images'
-                        vis.heatmap(mean_images, opts=opts, win='center images')
-                    
+                                    
         return h
 
     def criterion_jointhmm(self, recon_x, x, mu, logvar, e=0):
@@ -360,7 +357,7 @@ class VAE(nn.Module):
 
 
     def VAE_trainer(self, cuda, train_loader, 
-                    EP = 400,
+                    toy_data = False, EP = 400, 
                     vis = None, config_num=0, **kwargs):
 
         if hasattr(kwargs, 'optimizer'):
@@ -374,7 +371,7 @@ class VAE(nn.Module):
         L2 = self.L2
         Ks = self.Ks
 
-        lr = 1e-5
+        lr = 2e-4
         if optimizer == 'Adam':
             optimizerG = optim.Adam(self.parameters(), lr=lr, betas=(0.5, 0.999))
         elif optimizer == 'RMSprop':
@@ -386,15 +383,13 @@ class VAE(nn.Module):
 
         nbatches = 1400
         for ep in range(EP):
-            for i, (dt, tar, _) in enumerate(it.islice(train_loader, 0, nbatches, 1)):
+            for i, data in enumerate(it.islice(train_loader, 0, nbatches, 1)):
+                tar = data[0]
                 if cuda:
                     tar = tar.cuda()
 
-                #if 1:
-                #    tar = tar[:, :2, :, :]
-
-                tar = tar.view(-1, 1, L2).float()
-                tar = Variable(tar)
+                if self.arguments.data == 'celeba':
+                    tar = tar.view(-1, 1, L2).float()
 
                 # generator gradient
                 self.zero_grad()
@@ -410,35 +405,38 @@ class VAE(nn.Module):
                 # step 
                 optimizerG.step()
                 print('EP [{}/{}], error = {}, batch = [{}/{}], config num {}'.format(ep+1, EP, err_G.item(), 
-                                                                                i+1, len(train_loader), config_num))
+                                                                                      i+1, len(train_loader), config_num))
                                                                        
-                
-                if (i == 20):
-                    print(self.mus[:2, :2])
-                    # visdom plots
-                    # generate samples 
+                if self.data == 'gaussian_toy' and (ep % 50 == 0): 
+                    vis.scatter(tar, win='target')
+                    vis.scatter(out_g, win='output')
 
-                    #self.eval()
-                    #self.train(mode=False)
-                    #gen_data, seed = self.generate_data(30)
-                    #self.train(mode=True)
+                #if (i == 20):
+                #    print(self.mus[:2, :2])
+                #    # visdom plots
+                #    # generate samples 
 
-                    N = 200
-                    opts = {'title' : 'x'}
-                    vis.line(tar.cpu()[0].squeeze(), opts=opts, win='x')
+                #    #self.eval()
+                #    #self.train(mode=False)
+                #    #gen_data, seed = self.generate_data(30)
+                #    #self.train(mode=True)
 
-                    opts = {'title' : 'xhat'}
-                    vis.line(out_g.cpu()[0].squeeze(), opts=opts, win='xhat')
-                    
-                    vis.heatmap(F.softmax(self.A, dim=1), win='A')
-                    vis.heatmap(F.softplus(self.sigs), win='sigs')
-                    vis.heatmap(self.mus, win='mus')
+                #    N = 200
+                #    opts = {'title' : 'x'}
+                #    vis.line(tar.cpu()[0].squeeze(), opts=opts, win='x')
+
+                #    opts = {'title' : 'xhat'}
+                #    vis.line(out_g.cpu()[0].squeeze(), opts=opts, win='xhat')
+                #    
+                #    vis.heatmap(F.softmax(self.A, dim=1), win='A')
+                #    vis.heatmap(F.softplus(self.sigs), win='sigs')
+                #    vis.heatmap(self.mus, win='mus')
 
 
 
 class conv_VAE(VAE):
-    def __init__(self, L1, L2, Ks, M, num_gpus=4):
-        super(conv_VAE, self).__init__(L1, L2, Ks, M)
+    def __init__(self, L1, L2, Ks, M, num_gpus=4, arguments=None):
+        super(conv_VAE, self).__init__(L1, L2, Ks, M, arguments=arguments)
 
         self.fc1 = None
         self.fc21 = None
@@ -525,8 +523,6 @@ class conv_VAE(VAE):
     #    gen_data = self.decode(seed)
 
     #    return gen_data, seed
-
-
 
 
 def vis_plot_results(model, inv_f, data, vis, all_costs, ep, arguments):
@@ -672,15 +668,15 @@ def get_scores(test_loader, model, cuda, num_samples=1, task='celeba',
         gen_data, _ = model.generate_data(1000, base_dist=base_dist) 
         gen_data_flt = gen_data.view(-1, model.L2).data
         
-        print('computing linear mmd')
-        mmd = compute_mmd(gen_data_flt, all_test_cat_flt, sig, cuda, 
-                        kernel='linear')
-        mmds_lin.append(math.sqrt(mmd))
+        #print('computing linear mmd')
+        #mmd = compute_mmd(gen_data_flt, all_test_cat_flt, sig, cuda, 
+        #                kernel='linear')
+        #mmds_lin.append(math.sqrt(mmd))
         
-        print('computing stt mmd')
-        mmd = compute_mmd(gen_data_flt, all_test_cat_flt, sig, cuda, 
-                        kernel='stt')
-        mmds_stt.append(math.sqrt(mmd))
+        #print('computing stt mmd')
+        #mmd = compute_mmd(gen_data_flt, all_test_cat_flt, sig, cuda, 
+        #                kernel='stt')
+        #mmds_stt.append(math.sqrt(mmd))
 
         #print('computing frechet distance')
         #fds_all.append(compute_fd(gen_data_flt, all_test_cat_flt, cuda))
@@ -789,7 +785,7 @@ def get_embeddings(model, train_loader, cuda=True, flatten=True):
     # get hhats for all batches
     nbatches = 100
     all_hhats = []
-    for i, (data, _) in enumerate(it.islice(train_loader, 0, nbatches, 1)):
+    for i, (data, _) in enumerate(it.islice(train_loader, nbatches)):
         if cuda:
             data = data.cuda()
 

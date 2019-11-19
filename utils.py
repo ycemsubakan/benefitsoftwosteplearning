@@ -654,6 +654,7 @@ def preprocess_audio_files(arguments, overlap=False):
     dataset = TensorDataset(data_tensor=wavfls1,
                             target_tensor=wavfls1,
                             lens=inds)
+    pdb.set_trace()
         
 
     #arguments.fs = 16000 #fs  # add the sampling rate here
