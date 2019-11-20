@@ -31,7 +31,6 @@ import torch.nn.functional as F
 import visdom
 
 
-# this code is based on https://github.com/caogang/wgan-gp/blob/master/gan_mnist.py
 
 class vaegan_g(nn.Module):
     def __init__(self, Kz=40, K=1024):
@@ -80,8 +79,7 @@ class vaegan_d(nn.Module):
 
 
 
-
-#Reference: https://github.com/caogang/wgan-gp/blob/master/gan_cifar10.py
+# this code is based on https://github.com/caogang/wgan-gp/blob/master/gan_mnist.py
 def train_wgangp(dataloader):
     RESTORE_MODE = False # if True, it will load saved model from OUT_PATH and continue to train
     START_ITER = 0 # starting iteration 
@@ -278,14 +276,32 @@ if __name__ == '__main__':
         mdl.load_state_dict(torch.load(modelpath))
     mdl = mdl.to(device)
 
-    # get the embeddings
-    train_loader, _ = ut.get_loaders(3000, c=0, train_shuffle=True, arguments=arguments)
-    hhat = get_embeddings(mdl, train_loader)
-
-    hhat = data_utils.TensorDataset(hhat)
-    data_loader = data_utils.DataLoader(hhat, batch_size=3000, shuffle=True)
-
+    
     # fit the wgangp
-    train_wgangp(data_loader)
+    generator_path = 'vaeganprior/generator.pt'
+    if os.path.exists(generator_path):
+        
+        gen_images_vae, seed = mdl.generate_data(100) 
+        torchvision.utils.save_image(gen_images_vae.reshape(-1, 1, 28, 28), 'generations_vae_mnist.png') 
+        #vis.images(gen_images_vae.reshape(-1, 1, 28, 28), win='vae_genims')
+
+        aG = torch.load(generator_path)
+
+        gen_images_vaeganprior = generate_image(mdl, aG, seed)
+        torchvision.utils.save_image(gen_images_vaeganprior, 'generations_vaeganprior_mnist.png') 
+        #vis.images(gen_images_vaeganprior.reshape(-1, 1, 28, 28), win='vaeganp_genims')
+    else:
+        # get the embeddings
+        train_loader, _ = ut.get_loaders(3000, c=0, train_shuffle=True, arguments=arguments)
+        hhat = get_embeddings(mdl, train_loader)
+
+        hhat = data_utils.TensorDataset(hhat)
+        data_loader = data_utils.DataLoader(hhat, batch_size=3000, shuffle=True)
+
+        # train the gan
+        train_wgangp(data_loader)
+        
+
+
 
 

@@ -17,11 +17,17 @@ The code for the traces in Figure 7 is in `celeba_exps.py`.
 
 The code for the audio results is in `test_audio_all.py`
 
-## Training a prior for GAN
-
-The code this is in `wganpt/`. 
-
 ## Training a GAN prior for VAE
 
-The code for this is in `wganpt/`. 
+The code for this is in `wganpt/GAN_autoencoder_v2.py`. 
+
+## Training a prior for GAN
+
+The code this is in `wganpt/gan_train_forvae.py`. 
+
+Generated images for a given VAE
+!(VAE generated images)[wganpt/generations_vae_mnist.png]
+
+Generated images after we learn a GAN on the latent space of the VAE
+!(VAE generated images after learning a GAN on the latents)[wganpt/generations_vaeganprior_mnist.png]
 
