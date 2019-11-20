@@ -26,8 +26,8 @@ The code for this is in `wganpt/GAN_autoencoder_v2.py`.
 The code this is in `wganpt/gan_train_forvae.py`. 
 
 Generated images for a given VAE
-!(VAE generated images)[wganpt/generationsvaemnist.png]
+![VAE generated images](wganpt/generationsvaemnist.png)
 
 Generated images after we learn a GAN on the latent space of the VAE
-!(VAE generated images after learning a GAN on the latents)[wganpt/generationsvaeganpriormnist.png]
+![VAE generated images after learning a GAN on the latents](wganpt/generationsvaeganpriormnist.png)
 
