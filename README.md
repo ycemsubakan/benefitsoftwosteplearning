@@ -17,11 +17,12 @@ The code for the traces in Figure 7 is in `celeba_exps.py`.
 
 The code for the audio results is in `test_audio_all.py`
 
-## Training a GAN prior for VAE
+
+## Training a prior for GAN
 
 The code for this is in `wganpt/GAN_autoencoder_v2.py`. 
 
-## Training a prior for GAN
+## Training a GAN prior for VAE
 
 The code this is in `wganpt/gan_train_forvae.py`. 
 
